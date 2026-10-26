@@ -1,0 +1,62 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.admin == true ||
+        request.auth.token.role == 'admin'
+      );
+    }
+    
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Profile photos (compressed under 5MB)
+    match /profiles/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow write: if isOwner(userId) || isAdmin();
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Message attachments (images up to 5MB, videos up to 20MB, audio up to 10MB)
+    match /messages/{userId}/{allPaths=**} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.auth.uid == userId || isAdmin()
+      ) && (
+        // Images: max 5 MB
+        (request.resource.contentType.matches('image/.*') && request.resource.size < 5 * 1024 * 1024) ||
+        // Videos: max 20 MB
+        (request.resource.contentType.matches('video/.*') && request.resource.size < 20 * 1024 * 1024) ||
+        // Audio: max 10 MB
+        (request.resource.contentType.matches('audio/.*') && request.resource.size < 10 * 1024 * 1024)
+      );
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Help requests attachments
+    match /helpRequests/{userId}/{allPaths=**} {
+      allow read: if true;
+      allow create: if isSignedIn() && request.resource.size < 5 * 1024 * 1024;
+      allow delete: if isOwner(userId) || isAdmin();
+    }
+
+    // Public community assets (News, Mosques, Institutes, Transports)
+    match /community/{allPaths=**} {
+      allow read: if true;
+      allow write: if isAdmin() || (
+        request.auth.token.mosqueEditor == true ||
+        request.auth.token.schoolEditor == true ||
+        request.auth.token.hospitalEditor == true ||
+        request.auth.token.transportEditor == true
+      );
+    }
+  }
+}

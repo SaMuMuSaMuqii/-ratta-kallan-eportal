@@ -1,0 +1,252 @@
+my existing project “Ratta Kallan Portal”. It is a free community app for the poor and ordinary people of the village Ratta Kallan, Jhang, Pakistan. It has a directory of workers and shops (electrician, mason, tractor, doctor, milk seller and so on), mosques, schools, hospitals, transport, news, messages and a virtual school with an AI helper. The users are villagers, many of whom cannot read or write well, on cheap Android phones with slow internet. The interface is mainly Urdu (right to left), with Punjabi and English also supported.
+
+Your job is to read the whole project and fix every problem listed below, so that the app becomes safe, really shared between all villagers, easy to use by voice, easy on a small phone, and useful for poor families. Please follow these working rules:
+
+Keep all existing features, colours and style. Do not delete or simplify any feature to make your work easier.
+Keep the existing community rules and terms text (for example the rule about not listing women’s numbers or photos) unchanged.
+Work phase by phase in the order given in section 20. After every phase tell me in very simple Roman Urdu what you finished, because I am not a programmer.
+If something in this prompt is unclear, choose the simplest safe option and tell me what you chose. Do not skip any point.
+
+The biggest problems in the current app, so you understand why each section exists:
+
+Data is saved only on each phone (localStorage), so news, profiles and messages do not reach other villagers.
+The admin PIN (7788 and others) is written in the code and shown on screen. The password reset code (OTP) is shown on screen. Every profile with no password gets the password 1234.
+Messages never reach the person they are sent to, and there is no email notification.
+The AI assistant is not connected to the directory, the search is weak in Urdu, Punjabi and Roman Urdu, and voice search fails silently.
+People who cannot write cannot fill the registration form.
+Developer names in the footer carry the label "نوجوان", and there are female “village daughter” assistant personas that must be removed.
+The screen is not comfortable on a small phone.
+
+SECTION 1: FOOTER AND CREDITS CLEAN-UP (do this first)
+
+In App.tsx (around lines 1423 to 1430) every developer in the contributors list has the role "نوجوان معاون". Remove the word "نوجوان" completely. Show only the person’s name. No age label, no youth label and no role label next to names.
+Rename the variable youthContributors to contributors and remove the code comments that mention “Youth” or "نوجوانانِ رتہ کلاں".
+In the footer (around lines 2743 to 2770) change the heading "رتہ کلاں پورٹل کے نوجوان معاونین (Youth Contributors)" to "رتہ کلاں پورٹل کے معاونین".
+In the paragraph under it remove "نوجوانوں (Youth Contributors)" and write a plain sentence such as "جن افراد نے پورٹل بنانے، ڈیٹا اکٹھا کرنے اور ترتیب دینے میں کردار ادا کیا".
+In the closing sentence remove "باہمت نوجوانوں" and write "معاونین کی مشترکہ کاوشوں سے".
+Search the whole project for نوجوان, نوجوانوں, نوجوانان, Youth, youth and Nojawan. Remove them wherever they label developers, contributors, the footer, a heading or a teacher. Leave only genuine event news text (for example the cricket festival announcement) unchanged.
+In MainMenuDrawer.tsx (around line 194) change “9 نوجوان خواتین اساتذہ (ہوم ورک و صوتی سبق)” to "ہوم ورک اور صوتی سبق".
+
+SECTION 2: REMOVE THE FEMALE “VILLAGE DAUGHTER” ASSISTANTS AND YOUNG TEACHER PERSONAS
+
+In AiVillageAssistant.tsx remove the female persona completely: delete the name "محترمہ عائشہ بی بی", the voiceGender state, the female and male voice buttons, the default female voice, and every text that introduces the assistant as a woman, a girl, a daughter of the village, or with a sweet or personal character.
+Make it one neutral helper called "رتہ کلاں مددگار" with no gender, no age, no personal story and no character voice. Keep voice input and voice output with the phone’s default voice, and keep the speed option.
+In villageExtraData.ts and AiSchoolModal.tsx remove the nine young female teacher personas (مس اقراء، مس عائشہ، مس مریم، مس فاطمہ، مس زنیرہ، مس ثناء، مس حرا، مس ماہ نور، مس خدیجہ) and phrases like "نوجوان استانی" and "نوجوان معلمہ" in their greetings.
+Replace them with plain, gender-neutral subject helpers named only by subject: "ریاضی مددگار", "اردو مددگار", "انگلش مددگار", "سائنس مددگار", "اسلامیات مددگار". Keep all their lessons, quizzes and homework help.
+Greetings must be short and neutral, for example "السلام علیکم، آج کون سا سبق پڑھنا ہے؟". No personal names, no family words, no flattering phrases.
+
+SECTION 3: REAL SHARED BACKEND (most important)
+
+Move everything to Firebase so that all villagers see the same data:
+Firebase Authentication with email and password.
+Cloud Firestore for profiles, messages, news, mosques, institutes, transports, hospitals, alerts, school data, student progress and help requests.
+Firebase Storage for all images, videos and voice notes.
+Remove localStorage for all shared data. Keep localStorage only for harmless per-device settings such as language, theme, text size and which popups were already seen.
+Use real-time listeners so a new news item, profile or message appears on every phone without refreshing.
+Add an offline cache so the directory still opens on a weak connection.
+Add a one-time import screen for the admin that copies the built-in starter data (initialProfiles.ts, villageExtraData.ts and the others) into Firestore, plus a backup export and import button (JSON).
+
+SECTION 4: SIGN UP ONLY ONCE, STAY LOGGED IN
+
+A person registers one time with email and password. After that they must never have to log in again and again on the same phone.
+Use Firebase Auth with persistent login (browserLocalPersistence) so the login survives closing the browser, restarting the phone and app updates. The session refreshes itself and does not expire from inactivity.
+The user is logged out only when they press "لاگ آؤٹ" themselves (with a confirmation question), delete their account, or the admin disables the account. Add “Log out from all devices” in profile settings.
+Verify the email only once at registration (verification email with a resend button). After that never ask again.
+On the next opening the person goes straight into the portal, already logged in, and sees their profile button and inbox. People who are not logged in can still search and view the directory.
+Login works with email or mobile number.
+Never store a password anywhere: not in the database, not in localStorage, not in code. Firebase’s own secure token is the only thing kept on the phone.
+“Forgot password” uses Firebase’s real password reset email. Remove the fake on-screen OTP code completely.
+Each profile stores its owner’s user id. A logged-in owner can edit or delete only their own profile and see only their own inbox. Delete asks for confirmation and also removes that profile’s messages and files.
+No default password may exist anywhere. A profile created by the admin for someone else must send that person an invite or reset link, never a password such as 1234.
+Make the portal installable as an app on the phone home screen (PWA with manifest, icons and service worker) so it opens like an app and keeps the login.
+Show the person’s name and photo at the top so they know they are logged in.
+
+SECTION 5: PROFILE FORM THAT CAN BE FILLED BY VOICE (for people who cannot write)
+
+Every text box in the registration and edit forms (name, business name, mobile number, address, services, email, and so on) must have a small microphone button next to it. The person taps it, speaks, and the spoken words are written into the box. The person can then correct the text by typing.
+Also add one big button at the top of the form: "بول کر فارم بھریں". It starts a guided talking mode: the app asks each question aloud and listens to the answer. Questions in order: "آپ کا نام کیا ہے؟", "آپ کا موبائل نمبر کیا ہے؟", "آپ کہاں رہتے ہیں؟", "آپ کا کام یا کاروبار کیا ہے؟", "آپ کون سی خدمات دیتے ہیں؟", "آپ کا ای میل کیا ہے؟". After each answer the app reads it back ("کیا یہ درست ہے؟") with big buttons "جی ہاں" and "دوبارہ بولیں", then moves on. At the end it shows the filled form for a final check before saving.
+Mobile number by voice: understand digits spoken in Urdu, Punjabi and English (for example "صفر تین صفر صفر", “zero three zero zero”, "ਸਿਫ਼ਰ ਤਿੰਨ") and also numbers like "تین سو" when natural, convert them to digits, and format them as 03XX-XXXXXXX. Always show the number in big digits and read it back digit by digit for confirmation.
+Email by voice: understand words like “at the rate”, "ایٹ", "ڈاٹ کام", “gmail dot com” and turn them into a proper email address. Show it for confirmation and allow typing.
+Password is never filled by voice (for safety); it is always typed.
+Language choice for the microphone: Urdu, Punjabi, English. Use the Web Speech API. If Punjabi voice recognition is not supported, tell the person and use Urdu. Never switch silently to another language.
+Show clear Urdu messages for every voice failure: microphone permission denied, nothing heard, language not supported, browser not supported (suggest Chrome). Never fail silently, and always allow typing instead.
+Also add a camera button so the person can take their own photo or shop photo directly. Compress it on the phone before upload.
+Use the same voice buttons in the message box, the news box (for admins), the “help request” box (section 17) and the search bar.
+
+SECTION 6: CATEGORY “OTHER” WITH A CATEGORY THE PERSON WRITES (OR SPEAKS)
+
+The business category list must have a last item "دیگر (Other)". When the person chooses it, a new text box appears: "اپنے کام یا کاروبار کی قسم لکھیں یا بول کر بتائیں", with a microphone button.
+Save the typed or spoken text as the profile’s custom category. The profile must still be saved and shown normally, and must be searchable by that custom text (also in Roman Urdu and Punjabi).
+While typing, suggest custom categories that other people already wrote, so that the same trade is not written in ten different ways.
+Show the custom category on the profile card and in the filter list. The admin gets a screen to review custom categories, merge a custom category into an existing category or promote it to a new official category with its own icon and keywords.
+This must work in both AddProfileModal.tsx and RegisterItemModal.tsx, and the edit screen.
+
+SECTION 7: ADMIN AND SECTION MANAGERS
+
+No admin username, PIN, password or email may appear anywhere in the code, screens, placeholders, comments, README or .env.example.
+The admin is a normal Firebase user with a custom claim admin:true. Give me clear step-by-step instructions (and a small script or console steps) to set that claim on my own account, one time only.
+Every admin screen and every admin action is protected by that claim in the Firestore and Storage security rules, not only on the screen.
+Delete the “restore default admin credentials” button, every “default PIN 7788” help text, and every master override.
+Replace the shared sub-logins with per-section roles using custom claims: mosqueEditor, schoolEditor, hospitalEditor, transportEditor. Each can edit only their own section. The admin can give or remove roles by email.
+Remove the master override and any hardcoded password in TimetableEditModal and ProfileAuthChallengeModal.
+Add an admin screen to change password, manage section managers, manage extra search keywords, review custom categories, approve help requests, and see reported profiles.
+
+SECTION 8: SECURITY RULES (write the full files)
+
+Write complete firestore.rules and storage.rules.
+profiles: anyone can read the public fields only. Create only when signed in and the owner id equals the signed-in user. Update and delete only by the owner or the admin.
+messages: readable only by the sender, the owner of the receiving profile, and the admin. Nobody else.
+news, announcements, mosques, institutes, transports, hospitals: public read, write only by the admin or the matching section role.
+Admin and role data: writable only by the admin. Users can never change their own roles.
+Validate field types and sizes. Add basic spam limits: one message per 10 seconds per user and at most 5 profiles per account.
+Storage rules: images up to 5 MB, videos up to 20 MB, only the owner can delete their own files.
+Give me test cases to check the rules.
+
+SECTION 9: MESSAGES THAT REALLY REACH THE PERSON
+
+A message sent to a profile is saved in Firestore and appears in that owner’s inbox on their own phone, in real time. Keep the two-way thread (sender, receiver, admin), voice notes and the soft-delete archive.
+Attachments: the sender can attach a photo (gallery or camera), a short video, or both, together with text or a voice note. The receiver sees a photo preview and a video player in the inbox and thread. Allowed: JPG, PNG, WEBP up to 5 MB and MP4 or WEBM up to 20 MB. Compress photos on the phone before upload (target under 300 KB). Show an upload progress bar and a clear Urdu error if a file is too big or the type is wrong. Store files only in Firebase Storage, never inside the database text.
+Email notification: when someone sends a message to a profile, the owner automatically gets an email at the email they signed up with, even if their phone is off or the app is closed. Use a server-side Firebase Cloud Function that runs when a new message is created. The recipient’s email is read only on the server and never sent to the sender’s phone.
+Use a real email service (Firebase Trigger Email extension, or Resend, or SendGrid). Tell me which one you chose and give simple setup steps. Keep all keys in server secrets.
+Email content in Urdu and English: who sent the message, a preview of only the first 80 characters, a note if there is a photo or video, and one button "پیغام کھولیں" that opens the inbox. Never put the full private message in the email.
+Also email the original sender when the owner replies, and email the admin only for messages addressed to the admin.
+Add an on/off switch for email notifications in “My profile”.
+Anti-spam: at most one email per sender per receiver every 10 minutes (extra messages are grouped as "آپ کے 3 نئے پیغامات ہیں") and a daily limit per sender.
+Also add push notifications on the phone (Firebase Cloud Messaging), an unread badge on the inbox button, and a notification sound inside the app.
+If sending an email fails, retry later and log it. A failed email must never stop the message from being saved.
+The sender must be signed in so spam can be blocked. The sender sees replies under “My sent messages”.
+Messages are private. Never put them anywhere other users can read.
+
+SECTION 10: NEWS, BANNER AND POPUP FOR EVERYONE
+
+The admin or the correct section manager can create news, events, alerts, janaza notices, electricity and water notices, with options for “show as popup”, “show in banner”, and an expiry date. They can type or speak the text.
+Because data is now shared, every user sees the banner and popup on their own phone.
+A popup appears once per user per item, is easy to close (X button, tap outside, Escape key) and must never block the whole screen permanently.
+Emergency alerts use a stronger style and an optional spoken announcement.
+
+SECTION 11: ONE SHARED SEARCH ENGINE IN ALL LANGUAGES
+
+Create one module src/utils/searchEngine.ts used by the search bar, the voice search and the AI assistant. It searches everything: profiles (including custom categories), mosques, institutes, transports, hospitals, news, help requests and places.
+Clean the text: lowercase, remove Arabic diacritics, unify letter variants (ي and ى to ی, ك to ک, ہ ۃ ۂ to one form), remove punctuation, collapse spaces, convert Urdu and Arabic digits to English digits.
+Remove stop words in Urdu, Punjabi, English and Roman Urdu (for example: کون، ہے، کا، کی، کو، مجھے، چاہیے، بتاؤ، ko, ka, hai, mujhe, chahiye, near, find).
+Keep a keyword dictionary for every category, including Urdu script, Roman Urdu, English, and Punjabi in both Shahmukhi and Gurmukhi, with common spelling variations. Required examples:
+electrician: بجلی والا، بتی، لائٹ، وائرنگ، موٹر، bijli, bijli wala, light, wiring, ਬਿਜਲੀ
+doctor: ڈاکٹر، ڈاگدر، حکیم، دوائی، دوا، کلینک، ہسپتال، علاج، بخار، dawa, doctor, clinic, hakeem, ਡਾਕਟਰ
+tractor and farming: ٹریکٹر، ٹرالی، ہل، کھیتی، زمین، kheti, tractor, thresher, ਖੇਤੀ
+mason and building: مستری، راج، ٹائل، لینٹر، تعمیر، mistri, mason
+plumber: پلمبر، نلکا، پائپ، ٹوٹی، plumber, nalka
+transport: وین، گاڑی، لاری، جھنگ، سواری، رکشہ، van, bus, gaari
+school and tuition: سکول، مدرسہ، ٹیوشن، استاد، ماسٹر، school, tuition
+mosque: مسجد، نماز، جماعت، امام، azan, namaz, imam
+daily-wage labour: دیہاڑی، مزدور، مزدوری، labour, majdoor
+also milk, tailor, barber, welder, grocery, flour mill and others.
+The admin can add more keywords from the admin panel.
+Ranking: exact category match first, then name and business name, services, area, then close spelling matches (one letter difference for words longer than 4 letters), and a boost for people who are available now.
+Understand full sentences such as “mujhe bijli wala chahiye”, "نیڑے کوئی ڈاکٹر ہے؟", "ਟਰੈਕਟਰ ਵਾਲਾ ਦੱਸੋ", “who fixes motors tonight”.
+Return structured results (type, id, title, phone, area, status) that both the screen and the AI can use.
+Write automatic tests with at least 40 example searches across the four languages.
+Search bar screen: one global search bar at the top that shows grouped results (people, mosques, schools, hospitals, transport, news), searches while typing with a short delay, has a clear button, shows suggestions when nothing is found, remembers recent searches, and has a visible search button as well as the Enter key.
+
+SECTION 12: VOICE SEARCH AND SPOKEN ANSWERS
+
+A microphone button next to the search bar with a language choice (Urdu, Punjabi, English), using the Web Speech API where available.
+Ask for microphone permission properly and show a clear Urdu message for every failure: permission denied, nothing heard, language not supported, browser not supported (suggest Chrome). Never fail silently.
+If Punjabi speech recognition is not supported, tell the user and fall back to Urdu. Do not secretly switch to Hindi.
+Show the live text while the person speaks, then run the shared search with it.
+Read the answer aloud in the chosen language: name, trade, phone number digit by digit, and area. Add a stop button and a slow-speech option. Always allow typing as a fallback.
+
+SECTION 13: AI VILLAGE ASSISTANT (voice and text, using real data)
+
+The assistant answers only from real portal data: first call the shared search engine, then give only the best results to Gemini as context, and instruct Gemini to answer only from that data and say "مجھے معلوم نہیں" otherwise. It must never invent phone numbers or people.
+It understands Urdu, Punjabi, English and Roman Urdu, and replies in the user’s language.
+It supports voice in and voice out, keeps the chat history on the same screen, and has quick buttons: ڈاکٹر، الیکٹریشن، جھنگ کی وین، نماز کے اوقات، آج کی خبریں.
+Gemini calls must go through a server (Cloud Run, an Express route, or a Firebase Cloud Function). The API key must never be in browser code, never in a VITE_ variable, and never in git. Add a per-user rate limit.
+If the AI service is not available, fall back automatically to the shared search and show a short message saying why.
+The assistant has no gender, no personal story and no character, as described in section 2.
+
+SECTION 14: VIRTUAL SCHOOL
+
+Fully working lessons from Nursery to Matric: subjects, topics, short lessons, spoken lessons, and multiple-choice quizzes with scores saved per student account in Firestore.
+A progress screen (marks, weak topics) and a teacher or admin view of classes.
+The AI helper answers a child’s question in simple Urdu (or the chosen language) in 3 to 4 sentences and can read it aloud. It stays on school subjects and refuses unsafe topics.
+School timetables can be edited only by the schoolEditor role.
+
+SECTION 15: MOBILE-FRIENDLY SCREEN
+
+Design for a 360 to 412 px wide phone first. Bottom navigation bar with 5 large buttons: ڈائریکٹری، خبریں، پیغام (with unread badge)، اسکول، میں. Move rarely used items (register, login, admin) into "میں".
+Every button, input and link at least 44 px high. Input text at least 16 px so the phone does not zoom. Clear spacing and a readable Urdu font size.
+No sideways scrolling anywhere. Tables and long text must wrap or scroll inside their own box.
+Modals open as bottom sheets that fill the width of the phone, with a big close button, and never hide the buttons underneath permanently.
+Support light and dark mode and phone notches (safe-area spacing).
+Pages must load fast on a slow connection: lazy-load pictures and heavy screens.
+
+SECTION 16: DATA CLEAN-UP
+
+The starter profiles use fake numbers such as 0300-1234567. Mark them clearly as sample data so the admin can delete them in one click.
+Prayer times, bus fares and hospital hours must be editable by the right section manager and show the date they were last updated.
+
+SECTION 17: BENEFITS FOR POOR VILLAGERS (simple and free)
+
+The portal is free forever. No fees, no ads, no paid listing, no payment screens. Search results must not be ordered by money. Rotate the order of equal results fairly so that new and small workers also get seen.
+Add a category "دیہاڑی مزدور" (daily-wage workers) with a big switch "آج کام کے لیے دستیاب ہوں" that the worker can turn on or off in one tap, and a filter "آج دستیاب" for people looking for workers.
+Add a one-tap emergency box on the home screen: ایمبولینس، پولیس، فائر بریگیڈ، قریبی ہسپتال، with large call buttons that work even on a weak connection (store these numbers in the offline cache).
+Add a "مدد درکار ہے" noticeboard where a villager can post (by typing or speaking, with an optional photo) a need such as blood needed, lost and found, a missing animal, a request for help, or a charity or zakat need. The admin approves each post before it shows. Phone numbers on this board are shown only to signed-in users.
+Large text option (A+ button) for older people, and simple picture icons for every category so people who cannot read can still choose.
+Low-data mode: compress images, avoid auto-playing videos, and load heavy parts only when opened.
+All instructions inside the app use short, simple Urdu words. Add a short “How to use” screen with pictures and spoken instructions.
+Keep the existing “report this profile” feature and make reports visible to the admin.
+
+SECTION 18: THINGS THAT MUST NOT EXIST ANYWHERE
+
+No hardcoded PIN, password, username or email such as 7788, samar777, samar77, 1234, samarsaeed, samar, digitalworldonline777@gmail.com or anything similar. Search the whole project and confirm zero matches.
+No text on any screen that reveals a default or master credential.
+No fake OTP shown on screen. No “restore default admin” feature. No master override that lets one PIN open every profile.
+No password in plain text anywhere (state, storage, logs, database).
+No private data (messages, emails, private phone numbers) in localStorage or readable by other users.
+No base64 photos, videos or audio inside localStorage or database documents. Use Firebase Storage only.
+No API key in browser code, in .env.example values, or in git. No secret with a VITE_ prefix.
+No permission check that exists only on the screen. Every permission is also enforced by security rules or the server.
+No silent failures: every error shows a clear Urdu message and is logged.
+No dangerouslySetInnerHTML with user content. Clean all user text.
+No unused packages: remove express and dotenv if not needed, or build the real server. Make sure every package version exists and the project builds.
+No giant single files: split App.tsx (about 3,100 lines) and AdminPanelModal.tsx (about 2,200 lines) into feature folders (directory, news, messages, school, admin, auth, ai, voice), custom hooks and a data layer.
+No youth or age labels next to developer names, and no gendered or “village daughter” assistant personas (sections 1 and 2).
+No form field that can only be filled by typing: every text field must also offer voice input (section 5).
+
+SECTION 19: DEPENDENCIES AND SETUP
+
+Check package.json: make sure every package and version really exists, the project installs and builds, and remove packages that are not used.
+Give me a very simple step-by-step guide in Roman Urdu to create the Firebase project, switch on Authentication, Firestore, Storage and Cloud Functions, add the keys safely, and publish the app.
+Give me a .env.example with placeholder names only (no real values).
+
+SECTION 20: ORDER OF WORK
+
+Phase 1: sections 1 and 2 (footer and personas), then remove all hardcoded credentials, the fake OTP, the default-reset button and all master overrides. Add Firebase Auth. Give me the admin claim instructions.
+Phase 2: Firestore data layer, security rules, import of starter data, Storage for files.
+Phase 3: sign up once, stay logged in, edit and delete own profile, password reset by email.
+Phase 4: voice-filled forms and the “Other” category with custom text (sections 5 and 6).
+Phase 5: messages with photos and videos, inbox, thread, push notifications and email notifications.
+Phase 6: news, banner and popup for everyone.
+Phase 7: shared search engine, search bar and tests.
+Phase 8: voice search and spoken answers.
+Phase 9: AI assistant with server-side Gemini using real data.
+Phase 10: virtual school and timetable roles.
+Phase 11: poor-villager features (section 17), mobile-friendly screens and PWA.
+Phase 12: split the large files, run lint and build, run the final search for forbidden words.
+
+SECTION 21: WHAT TO GIVE ME AT THE END, AND TESTS
+
+Give me: the updated code, firestore.rules, storage.rules, the Cloud Functions code, a simple Firebase setup guide, a .env.example with placeholder names only, and a short README in Urdu and English.
+Then check and report on this list:
+A new user who cannot write registers on phone A only by speaking (guided mode), chooses "دیگر" and speaks a new category, then stays logged in after closing and reopening the app, and can edit or delete only their own profile.
+The admin posts a news item with popup on phone B and every other phone shows it.
+Phone C sends a message with a photo to a profile owned by phone A. A sees it in the inbox, receives an email notification, replies, and C sees the reply.
+A user who is not the admin cannot open admin screens or write admin data, even by changing the front end.
+Searching “bijli wala”, "بتی والا", "ڈاگدر", "ਟਰੈਕਟਰ", “van to Jhang”, "دیہاڑی مزدور" and the custom category just created each return the right results.
+Voice search and voice form filling work in Urdu and English and show a clear message when the microphone or language is not supported.
+The AI assistant answers “mujhe kal subah ke liye electrician chahiye” using real directory data, with no invented numbers.
+The footer and all screens contain no "نوجوان" label next to names, and no female village-daughter assistant or young teacher personas remain.
+The project-wide search for the forbidden words in section 18 finds nothing.
+The app has no sideways scrolling at 360 px width, and all buttons are at least 44 px high.
+The emergency box, the daily-wage “available today” switch and the help noticeboard work.
+npm run lint and npm run build both pass.

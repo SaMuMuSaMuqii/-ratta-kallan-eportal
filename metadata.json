@@ -1,0 +1,11 @@
+{
+  "name": "Ratta Kallan Portal",
+  "description": "رتہ کلاں جھنگ کمیونٹی و کاروبار پورٹل - Ratta Kallan, Jhang Community, Business & Service Directory with Voice Search, Audio Reader, and Private Messages.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="ur" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>رتہ کلاں جھنگ پورٹل | Ratta Kallan Village Portal</title>
+    <meta name="description" content="رتہ کلاں جھنگ کمیونٹی و کاروبار پورٹل - Ratta Kallan, Jhang Community, Business & Service Directory with Voice Search, Audio Reader, and Private Messages." />
+    <meta property="og:title" content="رتہ کلاں جھنگ پورٹل | Ratta Kallan Village Portal" />
+    <meta property="og:description" content="رتہ کلاں جھنگ کے باسیوں کے لیے کاروبار، ہنر مند افراد، موبائل نمبرز اور مفت رابطہ پورٹل۔" />
+    <meta property="og:type" content="website" />
+    <meta name="twitter:card" content="summary_large_image" />
+    
+    <!-- Fix for Chrome Extension request interceptors trying to overwrite window.fetch on Window object -->
+    <script>
+      (function() {
+        try {
+          var originalFetch = window.fetch ? window.fetch.bind(window) : null;
+          var currentFetch = originalFetch;
+          Object.defineProperty(window, 'fetch', {
+            configurable: true,
+            enumerable: true,
+            get: function() {
+              return currentFetch;
+            },
+            set: function(val) {
+              currentFetch = typeof val === 'function' ? val : originalFetch;
+            }
+          });
+        } catch (e) {
+          // ignore defineProperty issues
+        }
+
+        // Global safeguard against unhandled errors thrown by browser extensions
+        window.addEventListener('error', function(event) {
+          if (
+            (event.filename && event.filename.indexOf('chrome-extension://') !== -1) ||
+            (event.message && event.message.indexOf('Cannot set property fetch') !== -1)
+          ) {
+            event.preventDefault();
+            event.stopPropagation();
+            return false;
+          }
+        }, true);
+      })();
+    </script>
+
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#047857" />
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Gulzar&family=Noto+Nastaliq+Urdu:wght@400..700&family=Noto+Sans+Arabic:wght@400;500;600;700;800&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  </head>
+  <body class="bg-amber-50/40 text-stone-900 font-sans antialiased selection:bg-emerald-600 selection:text-white min-h-screen">
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', function() {
+          navigator.serviceWorker.register('/sw.js').catch(function() {});
+        });
+      }
+    </script>
+  </body>
+</html>
