@@ -121,6 +121,8 @@ import {
   sanitizePublicProfile,
   sanitizePublicProfileList,
   savePrivateProfileCredentials,
+  getSuperAdminCredentials,
+  saveSuperAdminCredentials,
   initialMandiRates,
   initialShelters,
   initialHelpGuides,
@@ -567,20 +569,15 @@ export default function App() {
   const [userPhoneInput, setUserPhoneInput] = useState(currentUserPhone);
   const [userNameInput, setUserNameInput] = useState(currentUserName);
 
-  // Legacy Admin Creds state (Zero hardcoded admin username, email, PIN or password)
-  const STORAGE_ADMIN_CREDS_KEY = 'rk_super_admin_credentials_v1';
-  const [adminCreds, setAdminCreds] = useState<{ username: string; pin: string; email?: string }>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_ADMIN_CREDS_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return { username: '', pin: '', email: '' };
-  });
+  // Super Admin Credentials state (never displayed in UI)
+  const [adminCreds, setAdminCreds] = useState<{ username: string; pin: string; email?: string }>(() =>
+    getSuperAdminCredentials()
+  );
 
   const handleUpdateAdminCreds = (newCreds: { username: string; pin: string; email?: string }) => {
-    setAdminCreds(newCreds);
-    localStorage.setItem(STORAGE_ADMIN_CREDS_KEY, JSON.stringify(newCreds));
-    showToastNotification('کوائف کامیابی سے محفوظ ہو گئے!');
+    saveSuperAdminCredentials(newCreds);
+    setAdminCreds(getSuperAdminCredentials());
+    showToastNotification('Admin credentials updated successfully.');
   };
 
   // Active User Authentication Session (Owner or Admin)
@@ -1750,13 +1747,13 @@ export default function App() {
   const handleLoginSuccess = (session: AuthUserSession) => {
     setActiveUserSession(session);
     localStorage.setItem(STORAGE_ACTIVE_SESSION_KEY, JSON.stringify(session));
-    showToastNotification(`خوش آمدید ${session.name}! آپ کامیابی سے لاگ ان ہو چکے ہیں۔`);
+    showToastNotification(`Welcome, ${session.name}! You have signed in successfully.`);
   };
 
   const handleLogout = () => {
     setActiveUserSession(null);
     localStorage.removeItem(STORAGE_ACTIVE_SESSION_KEY);
-    showToastNotification('آپ کامیابی سے لاگ آؤٹ ہو چکے ہیں!');
+    showToastNotification('You have signed out successfully.');
   };
 
   // Profile Edit / Delete Security Interceptors
@@ -2527,15 +2524,17 @@ export default function App() {
                 {lang === 'ur' ? 'اردو' : lang === 'pa' ? 'پنجابی' : 'EN'}
               </button>
 
-              {/* Account / Personal Security Login Button */}
+              {/* Account / Personal Security Sign In Button */}
               {activeUserSession ? (
                 <button
                   onClick={() => {
                     setAuthModalInitialMode('login');
                     setIsAuthModalOpen(true);
                   }}
-                  className="px-2 sm:px-2.5 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-xl text-[10px] sm:text-xs cursor-pointer flex items-center gap-1.5 border border-emerald-500/50 shadow-xs transition font-nastaliq"
-                  title={`${activeUserSession.name} (لاگ ان اکاؤنٹ)`}
+                  dir="ltr"
+                  lang="en"
+                  className="px-2 sm:px-2.5 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-xl text-[10px] sm:text-xs cursor-pointer flex items-center gap-1.5 border border-emerald-500/50 shadow-xs transition font-sans"
+                  title={`${activeUserSession.name} (Signed In — Click for Account & Sign Out)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
                   <span className="font-bold truncate max-w-[60px] sm:max-w-[90px]">
@@ -2548,11 +2547,13 @@ export default function App() {
                     setAuthModalInitialMode('login');
                     setIsAuthModalOpen(true);
                   }}
-                  className="px-2 sm:px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-[10px] sm:text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs transition active:scale-95 font-nastaliq"
-                  title="اپنے ذاتی اکاؤنٹ میں لاگ ان کریں"
+                  dir="ltr"
+                  lang="en"
+                  className="px-2 sm:px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-[10px] sm:text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs transition active:scale-95 font-sans"
+                  title="Sign In to your account"
                 >
                   <KeyRound className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-stone-950" />
-                  <span className="hidden xs:inline">لاگ ان</span>
+                  <span className="hidden xs:inline">Sign In</span>
                 </button>
               )}
             </div>

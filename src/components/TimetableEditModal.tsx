@@ -220,7 +220,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
         setIsAuthenticated(true);
       } else {
         setAuthError(
-          `صرف اس مسجد کے مجاز امام/متولی ہی اوقات بدل سکتے ہیں۔ درست پاس ورڈ درج کریں یا پورٹل ایڈمن سے رابطہ کریں۔`
+          'Invalid Username or Password. Only the authorized Mosque Imam or Administrator can update prayer schedules.'
         );
       }
     } else if (entityType === 'institute' && institute) {
@@ -235,7 +235,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
         setIsAuthenticated(true);
       } else {
         setAuthError(
-          `صرف اس اسکول کے ہیڈ ماسٹر/پرنسپل ہی ٹائم ٹیبل بدل سکتے ہیں۔ درست پاس ورڈ درج کریں یا پورٹل ایڈمن سے حاصل کریں۔`
+          'Invalid Username or Password. Only the authorized School Principal or Administrator can update the timetable.'
         );
       }
     } else if (entityType === 'hospital' && hospital) {
@@ -250,7 +250,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
         setIsAuthenticated(true);
       } else {
         setAuthError(
-          `صرف اس ہسپتال یا کلینک کے مجاز انچارج/ڈاکٹر ہی تفصیلات بدل سکتے ہیں۔ درست پاس ورڈ درج کریں یا پورٹل ایڈمن سے رابطہ کریں۔`
+          'Invalid Username or Password. Only the authorized Hospital In-Charge or Administrator can update medical details.'
         );
       }
     } else if (entityType === 'transport' && transport) {
@@ -265,7 +265,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
         setIsAuthenticated(true);
       } else {
         setAuthError(
-          `صرف اس گاڑی کے مجاز ڈرائیور یا مالک ہی کرایہ و اوقات بدل سکتے ہیں۔ درست پاس ورڈ درج کریں یا پورٹل ایڈمن سے رابطہ کریں۔`
+          'Invalid Username or Password. Only the authorized Driver or Administrator can update transport schedules.'
         );
       }
     }
@@ -438,36 +438,45 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
 
         {/* STEP 1: AUTHENTICATION LOGIN FORM */}
         {!isAuthenticated ? (
-          <form onSubmit={handleLogin} className="p-5 sm:p-6 space-y-4">
+          <form
+            onSubmit={handleLogin}
+            dir="ltr"
+            lang="en"
+            className="p-5 sm:p-6 space-y-4 font-sans text-left"
+            noValidate
+          >
             <div className="text-center space-y-2">
               <div className="w-12 h-12 rounded-2xl bg-emerald-100 border border-emerald-300 text-emerald-800 flex items-center justify-center mx-auto shadow-inner">
                 <Lock className="w-6 h-6 text-emerald-700" />
               </div>
-              <h4 className="font-bold font-nastaliq text-base text-stone-900">
-                مخصوص سب-لاگ ان (Username & Password)
+              <h4 className="font-bold text-base text-stone-900">
+                Section Manager Sign In
               </h4>
-              <p className="text-xs text-stone-600 font-nastaliq leading-relaxed">
-                رتہ کلاں پورٹل کے نظام کے تحت ہر مسجد، اسکول، ہسپتال اور گاڑی کا الگ پاس ورڈ مختص ہے۔ درست اسناد درج کریں:
+              <p className="text-xs text-stone-600 leading-relaxed">
+                Enter your assigned <strong>Username</strong> and <strong>Password</strong> to manage schedules and details for this section.
               </p>
             </div>
 
             {authError && (
-              <div className="bg-red-50 border-2 border-red-300 text-red-900 p-3 rounded-2xl text-xs font-nastaliq flex items-start gap-2">
+              <div
+                role="alert"
+                className="bg-red-50 border-2 border-red-300 text-red-900 p-3 rounded-2xl text-xs font-semibold flex items-start gap-2"
+              >
                 <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
                 <span>{authError}</span>
               </div>
             )}
 
-            <div className="space-y-3 font-nastaliq text-right">
+            <div className="space-y-3 text-left">
               <div>
-                <label className="text-xs font-bold text-stone-700 block mb-1">
-                  مخصوص یوزر نیم (Username):
+                <label className="text-xs font-bold text-stone-800 block mb-1">
+                  Username
                 </label>
                 <input
                   type="text"
                   value={usernameInput}
                   onChange={(e) => setUsernameInput(e.target.value)}
-                  placeholder="مثلاً: markazi_ratta یا dhq_jhang"
+                  placeholder="Enter your assigned username"
                   dir="ltr"
                   className="w-full p-2.5 rounded-xl border border-stone-300 text-sm focus:border-emerald-600 focus:outline-none"
                   required
@@ -475,14 +484,14 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
               </div>
 
               <div>
-                <label className="text-xs font-bold text-stone-700 block mb-1">
-                  پاس ورڈ (Password):
+                <label className="text-xs font-bold text-stone-800 block mb-1">
+                  Password
                 </label>
                 <input
                   type="password"
                   value={passwordInput}
                   onChange={(e) => setPasswordInput(e.target.value)}
-                  placeholder="اپنا خفیہ پاس ورڈ درج کریں"
+                  placeholder="Enter your password"
                   dir="ltr"
                   className="w-full p-2.5 rounded-xl border border-stone-300 text-sm focus:border-emerald-600 focus:outline-none"
                   required
@@ -492,36 +501,40 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
               <div className="bg-amber-50 p-2.5 rounded-xl border border-amber-300 text-[11px] text-amber-950 space-y-1">
                 <div className="flex items-center gap-1 font-bold text-amber-900">
                   <KeyRound className="w-3.5 h-3.5" />
-                  <span>پاس ورڈ حاصل کرنے یا ری سیٹ کروانے کا طریقہ:</span>
+                  <span>Forgot Password?</span>
                 </div>
                 <p>
-                  اگر آپ کے پاس پاس ورڈ نہیں ہے تو پورٹل ایڈمن سے رابطہ کر کے اپنی ای میل پر لاگ ان اور ترمیم کے اختیارات حاصل کریں۔
+                  If you need to reset your section password, please contact the Portal Administrator.
                 </p>
               </div>
             </div>
 
             <button
               type="submit"
-              className="w-full py-3 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white font-bold rounded-2xl shadow-lg transition active:scale-95 cursor-pointer font-nastaliq text-sm flex items-center justify-center gap-2"
+              className="w-full py-3 bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white font-bold rounded-2xl shadow-lg transition active:scale-95 cursor-pointer text-sm flex items-center justify-center gap-2"
             >
               <KeyRound className="w-4 h-4" />
-              <span>لاگ ان کریں اور تفصیلات ایڈٹ کریں</span>
+              <span>Sign In</span>
             </button>
           </form>
         ) : (
           /* STEP 2: AUTHENTICATED EDIT FORMS */
           <div className="p-4 sm:p-5 overflow-y-auto max-h-[75vh] space-y-4">
-            <div className="bg-emerald-50 border border-emerald-300 rounded-2xl p-2.5 flex items-center justify-between text-xs font-nastaliq text-emerald-950">
+            <div
+              dir="ltr"
+              lang="en"
+              className="bg-emerald-50 border border-emerald-300 rounded-2xl p-2.5 flex items-center justify-between text-xs font-sans text-emerald-950"
+            >
               <span className="flex items-center gap-1.5 font-bold">
                 <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                <span>تصدیق شدہ رسائی — آپ کامیابی سے لاگ ان ہیں</span>
+                <span>Authenticated — Signed In</span>
               </span>
               <button
                 type="button"
                 onClick={() => setIsAuthenticated(false)}
-                className="text-stone-500 hover:text-stone-800 text-[11px] underline cursor-pointer"
+                className="text-rose-700 hover:text-rose-900 text-xs font-bold underline cursor-pointer"
               >
-                لاگ آؤٹ
+                Sign Out
               </button>
             </div>
 
@@ -650,15 +663,15 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                 </div>
 
                 {/* Password reset option for Mosque */}
-                <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200">
+                <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
                   <label className="text-xs font-bold text-stone-700 block mb-1">
-                    اپنا پاس ورڈ تبدیل کریں (اختیاری):
+                    New Password (Optional)
                   </label>
                   <input
                     type="password"
                     value={mosqueNewPass}
                     onChange={(e) => setMosqueNewPass(e.target.value)}
-                    placeholder="نیا پاس ورڈ درج کریں"
+                    placeholder="Enter new password to update"
                     dir="ltr"
                     className="w-full p-2 rounded-xl border text-xs bg-white"
                   />
@@ -801,15 +814,15 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                 </div>
 
                 {/* Password reset option for School */}
-                <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200">
+                <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
                   <label className="text-xs font-bold text-stone-700 block mb-1">
-                    اپنا پاس ورڈ تبدیل کریں (اختیاری):
+                    New Password (Optional)
                   </label>
                   <input
                     type="password"
                     value={instNewPass}
                     onChange={(e) => setInstNewPass(e.target.value)}
-                    placeholder="نیا پاس ورڈ درج کریں"
+                    placeholder="Enter new password to update"
                     dir="ltr"
                     className="w-full p-2 rounded-xl border text-xs bg-white"
                   />
@@ -914,15 +927,15 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                 </div>
 
                 {/* Password reset option for Hospital */}
-                <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200">
+                <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
                   <label className="text-xs font-bold text-stone-700 block mb-1">
-                    اپنا پاس ورڈ تبدیل کریں (اختیاری):
+                    New Password (Optional)
                   </label>
                   <input
                     type="password"
                     value={hospNewPass}
                     onChange={(e) => setHospNewPass(e.target.value)}
-                    placeholder="نیا پاس ورڈ درج کریں"
+                    placeholder="Enter new password to update"
                     dir="ltr"
                     className="w-full p-2 rounded-xl border text-xs bg-white"
                   />
@@ -1032,15 +1045,15 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                 </div>
 
                 {/* Password reset option for Transport */}
-                <div className="bg-stone-50 p-2.5 rounded-xl border border-stone-200">
+                <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
                   <label className="text-xs font-bold text-stone-700 block mb-1">
-                    اپنا پاس ورڈ تبدیل کریں (اختیاری):
+                    New Password (Optional)
                   </label>
                   <input
                     type="password"
                     value={transNewPass}
                     onChange={(e) => setTransNewPass(e.target.value)}
-                    placeholder="نیا پاس ورڈ درج کریں"
+                    placeholder="Enter new password to update"
                     dir="ltr"
                     className="w-full p-2 rounded-xl border text-xs bg-white"
                   />

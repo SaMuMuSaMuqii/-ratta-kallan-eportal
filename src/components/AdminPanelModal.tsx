@@ -60,7 +60,14 @@ import {
 } from '../firebase/firestoreService';
 import { auth, isFirebaseConfigured } from '../firebase/config';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
-import { isAuthorizedSuperAdminResetEmail } from '../utils/privacySanitizer';
+import {
+  isAuthorizedSuperAdminResetEmail,
+  getSuperAdminCredentials,
+  saveSuperAdminCredentials,
+  verifySuperAdminCredentials,
+  STORAGE_SUPER_ADMIN_CREDS_V2_KEY,
+} from '../utils/privacySanitizer';
+import { dispatchPasswordResetEmail } from '../firebase/emailNotificationService';
 
 // Official Facebook Icon SVG
 export const FacebookIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -69,7 +76,7 @@ export const FacebookIcon: React.FC<{ className?: string }> = ({ className = 'w-
   </svg>
 );
 
-const STORAGE_ADMIN_CREDS_KEY = 'rk_super_admin_credentials_v1';
+const STORAGE_ADMIN_CREDS_KEY = STORAGE_SUPER_ADMIN_CREDS_V2_KEY;
 const LOCAL_ADMIN_PASS_VERIFIER_MAP_KEY = 'rk_admin_email_pass_verifiers_v1';
 
 interface AdminPanelModalProps {
@@ -171,22 +178,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 }) => {
   const t = translations[lang];
 
-  // Admin credentials in localStorage or config
-  const [adminCreds, setAdminCreds] = useState<{ username: string; pin: string }>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_ADMIN_CREDS_KEY);
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return { username: 'admin', pin: '' };
-  });
+  // Admin credentials in localStorage or config (never displayed in UI)
+  const [adminCreds, setAdminCreds] = useState<{ username: string; pin: string }>(() =>
+    getSuperAdminCredentials()
+  );
 
-  // Admin authentication state (Email Login + Password Recovery)
+  // Admin authentication state (Sign In + Reset Password)
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authSubTab, setAuthSubTab] = useState<'email_login' | 'password_recovery'>('email_login');
   const [usernameInput, setUsernameInput] = useState('');
   const [pinInput, setPinInput] = useState('');
   const [recoveryEmailInput, setRecoveryEmailInput] = useState('');
   const [recoveryNewPassInput, setRecoveryNewPassInput] = useState('');
+  const [recoveryConfirmPassInput, setRecoveryConfirmPassInput] = useState('');
   const [recoveryNotice, setRecoveryNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [authError, setAuthError] = useState('');
 
@@ -223,9 +227,11 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
   const [editingTransport, setEditingTransport] = useState<VillageTransport | null>(null);
   const [editingHospital, setEditingHospital] = useState<VillageHospital | null>(null);
 
-  // Super Admin credentials reset form
-  const [newAdminUser, setNewAdminUser] = useState(adminCreds.username);
-  const [newAdminPin, setNewAdminPin] = useState(adminCreds.pin);
+  // Super Admin credentials reset form (inputs start empty so credentials are never shown on screen)
+  const [newAdminUser, setNewAdminUser] = useState('');
+  const [newAdminPin, setNewAdminPin] = useState('');
+  const [confirmAdminPin, setConfirmAdminPin] = useState('');
+  const [adminCredsError, setAdminCredsError] = useState('');
   const [adminCredsSuccess, setAdminCredsSuccess] = useState(false);
 
   useEffect(() => {
@@ -233,15 +239,10 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
       if (activeSession?.type === 'admin' || activeSession?.roles?.admin === true) {
         setIsAuthenticated(true);
       }
-      try {
-        const saved = localStorage.getItem(STORAGE_ADMIN_CREDS_KEY);
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          setAdminCreds(parsed);
-          setNewAdminUser(parsed.username);
-          setNewAdminPin(parsed.pin);
-        }
-      } catch {}
+      setAdminCreds(getSuperAdminCredentials());
+      setNewAdminUser('');
+      setNewAdminPin('');
+      setConfirmAdminPin('');
     }
   }, [isOpen, activeSession]);
 
@@ -281,13 +282,47 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     const enteredPin = pinInput.trim();
     const enteredUser = usernameInput.trim().toLowerCase();
 
-    if (!enteredPin) {
-      setAuthError('براہ کرم اپنا ایڈمن پاس ورڈ درج کریں۔');
+    if (!enteredUser || !enteredPin) {
+      setAuthError('Please enter both your Username and Password.');
       return;
     }
 
-    // 1. Check Email + Password Login against Firebase Auth & `roles` collection / email verifier
+    // 1. Direct Super Admin Verification (digitalworldonline777@gmail.com + samumusa@1999 or updated password)
+    if (verifySuperAdminCredentials(enteredUser, enteredPin, adminCreds)) {
+      const uid = `uid-${enteredUser.replace(/[^a-z0-9]/g, '_')}`;
+      setIsAuthenticated(true);
+      setAuthError('');
+      if (onAdminLoginSuccess) {
+        onAdminLoginSuccess({
+          type: 'admin',
+          id: 'super-admin',
+          uid,
+          username: 'Super Admin',
+          name: 'Samar Saeed (Super Admin)',
+          email: adminCreds.username,
+          loginTime: new Date().toISOString(),
+          roles: {
+            admin: true,
+            alertManager: true,
+            mosqueEditor: true,
+            schoolEditor: true,
+            hospitalEditor: true,
+            transportEditor: true,
+          },
+        });
+      }
+      return;
+    }
+
+    // 2. Check Email + Password Login against Firebase Auth & `roles` collection / email verifier
     if (enteredUser.includes('@')) {
+      if (isAuthorizedSuperAdminResetEmail(enteredUser)) {
+        setAuthError(
+          'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" above.'
+        );
+        return;
+      }
+
       let uid = `uid-${enteredUser.replace(/[^a-z0-9]/g, '_')}`;
       if (isFirebaseConfigured()) {
         try {
@@ -307,7 +342,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           const expectedPass = decodeURIComponent(escape(atob(savedEncoded)));
           if (expectedPass !== enteredPin) {
             setAuthError(
-              'غلط پاس ورڈ! اگر آپ پاس ورڈ بھول گئے ہیں تو اوپر "پاس ورڈ ریکوری / ری سیٹ" ٹیب دبائیں۔'
+              'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" above.'
             );
             return;
           }
@@ -323,8 +358,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
             type: 'admin',
             id: roleDoc.uid || uid,
             uid: roleDoc.uid || uid,
-            username: roleDoc.name || enteredUser.split('@')[0],
-            name: roleDoc.name || 'پورٹل ایڈمن',
+            username: roleDoc.name || 'Portal Admin',
+            name: roleDoc.name || 'Portal Admin',
             email: enteredUser,
             loginTime: new Date().toISOString(),
             roles: {
@@ -340,33 +375,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         return;
       }
 
-      // If not yet in `roles`, auto-register ifadminCreds match or guide user
-      if (adminCreds.pin && enteredPin === adminCreds.pin) {
-        setIsAuthenticated(true);
-        setAuthError('');
-        return;
-      }
-
       setAuthError(
-        'اس ای میل کے لیے ابھی roles کلیکشن میں admin: true موجود نہیں، یا نیچے "ای میل کو ایڈمن بنائیں" بٹن دبائیں۔'
+        'Access Denied: This account does not have administrator privileges.'
       );
       return;
     }
 
-    // 2. Fallback: Check credentials against local adminCreds
-    const isCustomMatch =
-      adminCreds.pin &&
-      (enteredUser === '' || enteredUser === adminCreds.username.toLowerCase()) &&
-      enteredPin === adminCreds.pin;
-
-    if (isCustomMatch) {
-      setIsAuthenticated(true);
-      setAuthError('');
-    } else {
-      setAuthError(
-        'غلط ای میل یا پاس ورڈ! براہ کرم اپنی ایڈمن ای میل اور پاس ورڈ لکھیں، یا "پاس ورڈ ریکوری / ری سیٹ" ٹیب کھولیں۔'
-      );
-    }
+    setAuthError(
+      'Invalid Username or Password. Please verify your credentials or click "Forgot Password?" to reset.'
+    );
   };
 
   // Handle Admin Password Recovery via Email Reset Link + New Password Setup
@@ -375,11 +392,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     setRecoveryNotice(null);
     const cleanEmail = (recoveryEmailInput || usernameInput).trim().toLowerCase();
     const newPass = recoveryNewPassInput.trim();
+    const confirmPass = recoveryConfirmPassInput.trim();
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setRecoveryNotice({
         type: 'error',
-        text: 'براہ کرم اپنا درست ایڈمن ای میل ایڈریس درج کریں۔',
+        text: 'Please enter a valid Admin Email Address.',
       });
       return;
     }
@@ -387,17 +405,26 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (!isAuthorizedSuperAdminResetEmail(cleanEmail)) {
       setRecoveryNotice({
         type: 'error',
-        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) کو ہی ایڈمن پینل کا پاس ورڈ ری سیٹ کرنے کی اجازت ہے۔ باقی تمام صارفین صرف اپنی پروفائل کی ای میل سے اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔',
+        text: 'Access Denied: Only the authorized Super Admin email address is permitted to reset the Admin password.',
       });
       return;
     }
 
-    if (newPass && newPass.length < 6) {
-      setRecoveryNotice({
-        type: 'error',
-        text: 'نیا پاس ورڈ کم از کم 6 حروف یا ہندسوں کا ہونا لازمی ہے۔',
-      });
-      return;
+    if (newPass) {
+      if (newPass.length < 6) {
+        setRecoveryNotice({
+          type: 'error',
+          text: 'New Password must be at least 6 characters long.',
+        });
+        return;
+      }
+      if (confirmPass && newPass !== confirmPass) {
+        setRecoveryNotice({
+          type: 'error',
+          text: 'New Password and Confirm New Password do not match.',
+        });
+        return;
+      }
     }
 
     // Save new recovery password & ensure role doc exists for this admin email
@@ -409,60 +436,79 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         localStorage.setItem(LOCAL_ADMIN_PASS_VERIFIER_MAP_KEY, JSON.stringify(map));
       } catch {}
 
-      const updated = { username: cleanEmail, pin: newPass };
-      setAdminCreds(updated);
-      localStorage.setItem(STORAGE_ADMIN_CREDS_KEY, JSON.stringify(updated));
+      saveSuperAdminCredentials({ username: cleanEmail, pin: newPass, email: cleanEmail });
+      setAdminCreds(getSuperAdminCredentials());
 
       const uid = `uid-${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
       await saveRoleAssignmentToFirestore({
         uid,
         email: cleanEmail,
-        name: cleanEmail.split('@')[0],
+        name: 'Samar Saeed (Super Admin)',
         admin: true,
         updatedAt: new Date().toISOString(),
-        updatedBy: cleanEmail,
+        updatedBy: 'super-admin',
       });
 
-      setUsernameInput(cleanEmail);
-      setPinInput(newPass);
+      setUsernameInput('');
+      setPinInput('');
     }
 
     try {
+      await dispatchPasswordResetEmail({
+        email: cleanEmail,
+        username: 'Super Admin',
+        accountRole: 'Super Admin',
+      });
       if (isFirebaseConfigured()) {
         await sendPasswordResetEmail(auth, cleanEmail);
       }
       setRecoveryNotice({
         type: 'success',
         text: newPass
-          ? `✓ آپ کی ای میل (${cleanEmail}) پر ری سیٹ لنک بھیج دیا گیا ہے اور نیا پاس ورڈ بھی محفوظ کر دیا گیا ہے! اب "ایڈمن ای میل لاگ ان" ٹیب سے لاگ ان کریں۔`
-          : `✓ پاس ورڈ ری سیٹ کا لنک آپ کی ای میل (${cleanEmail}) پر بھیج دیا گیا ہے۔ اپنی ای میل چیک کریں یا نیچے نیا پاس ورڈ لکھ کر فوری ری سیٹ کریں۔`,
+          ? 'A password reset link has been sent and your New Password has been saved! Click "Back to Sign In" to sign in.'
+          : 'A password reset link has been sent to your registered email address. Check your inbox or enter a New Password below.',
       });
     } catch {
       setRecoveryNotice({
         type: 'success',
         text: newPass
-          ? `✓ آپ کی ایڈمن ای میل (${cleanEmail}) اور نیا پاس ورڈ کامیابی سے ری سیٹ ہو گیا ہے! اب آپ اس ای میل اور پاس ورڈ سے لاگ ان کر سکتے ہیں۔`
-          : `✓ ای میل (${cleanEmail}) کے لیے پاس ورڈ ری سیٹ کی درخواست مکمل ہو گئی ہے۔ فوری نیا پاس ورڈ رکھنے کے لیے نیچے نیا پاس ورڈ لکھ کر بٹن دبائیں۔`,
+          ? 'Your Admin password has been reset successfully! Click "Back to Sign In" to sign in.'
+          : 'Password reset request verified. You may also enter a New Password below to complete recovery.',
       });
     }
   };
 
   const handleResetAdminCredentials = (e: React.FormEvent) => {
     e.preventDefault();
+    setAdminCredsError('');
+    setAdminCredsSuccess(false);
     const candidateEmail = newAdminUser.trim().toLowerCase();
-    if (!candidateEmail || !newAdminPin.trim()) {
-      alert('ایڈمن ای میل اور پاس ورڈ خالی نہیں ہو سکتے۔');
+    const cleanPass = newAdminPin.trim();
+    const cleanConfirm = confirmAdminPin.trim();
+
+    if (!candidateEmail || !cleanPass) {
+      setAdminCredsError('Please enter both Email Address and New Password.');
       return;
     }
     if (!isAuthorizedSuperAdminResetEmail(candidateEmail)) {
-      alert(
-        'صرف آفیشل سپر ایڈمن کی ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل کا پاس ورڈ تبدیل یا ری سیٹ کر سکتی ہے۔'
+      setAdminCredsError(
+        'Access Denied: Only the authorized Super Admin email address is permitted to reset Admin credentials.'
       );
       return;
     }
-    const updated = { username: candidateEmail, pin: newAdminPin.trim() };
-    setAdminCreds(updated);
-    localStorage.setItem(STORAGE_ADMIN_CREDS_KEY, JSON.stringify(updated));
+    if (cleanPass.length < 4) {
+      setAdminCredsError('New Password must be at least 4 characters long.');
+      return;
+    }
+    if (cleanConfirm && cleanPass !== cleanConfirm) {
+      setAdminCredsError('New Password and Confirm New Password do not match.');
+      return;
+    }
+    saveSuperAdminCredentials({ username: candidateEmail, pin: cleanPass, email: candidateEmail });
+    setAdminCreds(getSuperAdminCredentials());
+    setNewAdminUser('');
+    setNewAdminPin('');
+    setConfirmAdminPin('');
     setAdminCredsSuccess(true);
     setTimeout(() => setAdminCredsSuccess(false), 3000);
   };
@@ -621,22 +667,26 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
           </button>
         </div>
 
-        {/* Auth Barrier: Admin Email Login & Password Recovery */}
+        {/* Auth Barrier: Admin Sign In & Password Reset */}
         {!isAuthenticated ? (
-          <div className="p-5 sm:p-7 max-w-md w-full mx-auto text-center space-y-4 my-auto font-nastaliq">
+          <div
+            dir="ltr"
+            lang="en"
+            className="p-5 sm:p-7 max-w-md w-full mx-auto text-left space-y-4 my-auto font-sans"
+          >
             <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-800 flex items-center justify-center mx-auto shadow-inner">
               <KeyRound className="w-7 h-7" />
             </div>
-            <div>
+            <div className="text-center">
               <h3 className="font-bold text-lg text-stone-900">
-                ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری
+                Admin Sign In & Password Reset
               </h3>
               <p className="text-xs text-stone-600 mt-1">
-                اپنی ایڈمن ای میل اور پاس ورڈ سے لاگ ان کریں یا پاس ورڈ بھولنے کی صورت میں ای میل کے ذریعے ری سیٹ کریں۔
+                Sign in with your Admin credentials or reset your password via your registered Email Address.
               </p>
             </div>
 
-            {/* Sub-Tabs: Email Login vs Password Recovery */}
+            {/* Sub-Tabs: Sign In vs Reset Password */}
             <div className="grid grid-cols-2 rounded-2xl overflow-hidden border border-emerald-700 bg-stone-100 text-xs font-bold">
               <button
                 type="button"
@@ -650,7 +700,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     : 'text-stone-700 hover:bg-stone-200'
                 }`}
               >
-                📧 ایڈمن ای میل لاگ ان
+                Sign In
               </button>
               <button
                 type="button"
@@ -665,21 +715,21 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     : 'text-stone-700 hover:bg-stone-200'
                 }`}
               >
-                🔑 پاس ورڈ ریکوری / ری سیٹ
+                Reset Password
               </button>
             </div>
 
             {authSubTab === 'email_login' ? (
-              <form onSubmit={handleLogin} className="space-y-3 pt-1 text-right">
+              <form onSubmit={handleLogin} className="space-y-3 pt-1 text-left" noValidate>
                 <div>
                   <label className="block text-xs font-bold text-stone-800 mb-1">
-                    📧 ایڈمن ای میل ایڈریس (Admin Email):
+                    Username
                   </label>
                   <input
                     type="text"
                     value={usernameInput}
                     onChange={(e) => setUsernameInput(e.target.value)}
-                    placeholder="name@example.com"
+                    placeholder="Enter admin username or email address"
                     className="w-full text-left text-sm font-sans rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-stone-50"
                     required
                   />
@@ -688,7 +738,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="block text-xs font-bold text-stone-800">
-                      🔑 ایڈمن پاس ورڈ *:
+                      Password
                     </label>
                     <button
                       type="button"
@@ -697,23 +747,23 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         setRecoveryEmailInput(usernameInput.includes('@') ? usernameInput : '');
                         setRecoveryNotice(null);
                       }}
-                      className="text-[11px] text-amber-700 hover:text-amber-900 underline font-bold cursor-pointer"
+                      className="text-xs text-amber-700 hover:text-amber-900 underline font-bold cursor-pointer"
                     >
-                      پاس ورڈ بھول گئے؟ ریکور کریں
+                      Forgot Password?
                     </button>
                   </div>
                   <input
                     type="password"
                     value={pinInput}
                     onChange={(e) => setPinInput(e.target.value)}
-                    placeholder="اپنا ایڈمن پاس ورڈ درج کریں"
-                    className="w-full text-center text-sm font-mono rounded-xl border border-stone-300 px-4 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-stone-50"
+                    placeholder="Enter your admin password"
+                    className="w-full text-left text-sm font-sans rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-stone-50"
                     required
                   />
                 </div>
 
                 {authError && (
-                  <p className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5 font-semibold text-center">
+                  <p role="alert" className="text-xs text-red-700 bg-red-50 border border-red-200 rounded-xl p-2.5 font-semibold">
                     {authError}
                   </p>
                 )}
@@ -724,24 +774,25 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     onClick={onClose}
                     className="flex-1 py-2.5 rounded-xl border border-stone-300 text-stone-700 text-xs font-semibold cursor-pointer"
                   >
-                    منسوخ کریں
+                    Cancel
                   </button>
                   <button
                     type="submit"
                     className="flex-1 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold shadow cursor-pointer transition"
                   >
-                    ایڈمن لاگ ان کریں
+                    Sign In
                   </button>
                 </div>
               </form>
             ) : (
-              <form onSubmit={handleAdminPasswordRecovery} className="space-y-3 pt-1 text-right">
+              <form onSubmit={handleAdminPasswordRecovery} className="space-y-3 pt-1 text-left" noValidate>
                 <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-xs text-amber-950 leading-relaxed">
-                  اپنی ایڈمن ای میل لکھیں تاکہ ری سیٹ لنک آپ کی ای میل پر بھیجا جا سکے، اور اگر آپ فوری نیا پاس ورڈ رکھنا چاہتے ہیں تو نیچے نیا پاس ورڈ بھی درج کریں۔
+                  Enter your authorized Admin <strong>Email Address</strong> to receive a password reset link, or set a <strong>New Password</strong> below.
                 </div>
 
                 {recoveryNotice && (
                   <div
+                    role="alert"
                     className={`p-2.5 rounded-xl text-xs font-bold border ${
                       recoveryNotice.type === 'success'
                         ? 'bg-emerald-50 border-emerald-400 text-emerald-900'
@@ -754,13 +805,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-stone-800 mb-1">
-                    📧 ایڈمن ای میل ایڈریس:
+                    Email Address
                   </label>
                   <input
                     type="email"
                     value={recoveryEmailInput}
                     onChange={(e) => setRecoveryEmailInput(e.target.value)}
-                    placeholder="name@example.com"
+                    placeholder="Enter your admin email address"
                     className="w-full text-left text-sm font-sans rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-stone-50"
                     required
                   />
@@ -768,14 +819,27 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
                 <div>
                   <label className="block text-xs font-bold text-stone-800 mb-1">
-                    🔑 نیا ایڈمن پاس ورڈ رکھیں (اختیاری — کم از کم 6 حروف):
+                    New Password
                   </label>
                   <input
                     type="password"
                     value={recoveryNewPassInput}
                     onChange={(e) => setRecoveryNewPassInput(e.target.value)}
-                    placeholder="نیا پاس ورڈ لکھیں (فوری ری سیٹ کے لیے)"
-                    className="w-full text-center text-sm font-mono rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-stone-50"
+                    placeholder="Optional: Enter new password (min. 6 characters)"
+                    className="w-full text-left text-sm font-sans rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-stone-50"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-stone-800 mb-1">
+                    Confirm New Password
+                  </label>
+                  <input
+                    type="password"
+                    value={recoveryConfirmPassInput}
+                    onChange={(e) => setRecoveryConfirmPassInput(e.target.value)}
+                    placeholder="Optional: Confirm your new password"
+                    className="w-full text-left text-sm font-sans rounded-xl border border-stone-300 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-amber-500 bg-stone-50"
                   />
                 </div>
 
@@ -783,7 +847,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   type="submit"
                   className="w-full py-2.5 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-bold shadow cursor-pointer transition"
                 >
-                  📧 ری سیٹ لنک بھیجیں اور نیا پاس ورڈ محفوظ کریں
+                  Send Reset Link
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setAuthSubTab('email_login')}
+                  className="w-full py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-700 text-xs font-bold cursor-pointer transition"
+                >
+                  Back to Sign In
                 </button>
               </form>
             )}
@@ -796,7 +868,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   className="w-full py-2.5 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 text-amber-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
                 >
                   <ShieldCheck className="w-4 h-4" />
-                  <span>الگ مکمل ایڈمن نگرانی ڈیش بورڈ (#admin) کھولیں ➔</span>
+                  <span>Open Full Admin Supervision Console (#admin)</span>
                 </button>
               </div>
             )}
@@ -915,14 +987,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
               <button
                 onClick={() => setActiveTab('credentials')}
-                className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 whitespace-nowrap cursor-pointer font-sans ${
                   activeTab === 'credentials'
                     ? 'bg-indigo-700 text-white shadow-sm'
                     : 'text-stone-700 hover:bg-stone-200'
                 }`}
               >
                 <KeyRound className="w-3.5 h-3.5" />
-                <span>مساجد و اسکول پاس ورڈز</span>
+                <span>Section Passwords</span>
               </button>
 
               <button
@@ -952,14 +1024,14 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
               <button
                 onClick={() => setActiveTab('admin_creds')}
-                className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 whitespace-nowrap cursor-pointer ${
+                className={`px-3 py-1.5 rounded-xl transition flex items-center gap-1 whitespace-nowrap cursor-pointer font-sans ${
                   activeTab === 'admin_creds'
                     ? 'bg-amber-500 text-stone-950 shadow-sm'
                     : 'text-amber-800 bg-amber-50 hover:bg-amber-100'
                 }`}
               >
                 <ShieldCheck className="w-3.5 h-3.5" />
-                <span>ایڈمن لاگ ان ری سیٹ</span>
+                <span>Reset Password</span>
               </button>
 
               <button
@@ -1120,52 +1192,86 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 </div>
               )}
 
-              {/* TAB 1: ADMIN LOGIN RESET (Requested by user) */}
+              {/* TAB 1: ADMIN LOGIN RESET */}
               {activeTab === 'admin_creds' && (
-                <div className="space-y-4 max-w-lg mx-auto font-nastaliq">
+                <div
+                  dir="ltr"
+                  lang="en"
+                  className="space-y-4 max-w-lg mx-auto font-sans text-left"
+                >
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-3xl p-4 space-y-2">
                     <h4 className="font-bold text-amber-950 text-base flex items-center gap-2">
                       <ShieldCheck className="w-5 h-5 text-amber-600" />
-                      <span>سپر ایڈمن (ثمر سعید) لاگ ان اور پاس ورڈ تبدیل کریں</span>
+                      <span>Super Admin — Reset Password & Credentials</span>
                     </h4>
                     <p className="text-xs text-amber-900 leading-relaxed">
-                      آپ اپنی مرضی کا کوئی بھی یوزر نیم اور پاس ورڈ یا پن کوڈ سیٹ کر سکتے ہیں۔ یہ تبدیلی محفوظ ہو جائے گی اور آئندہ اسی سے لاگ ان ہو گا۔
+                      Update the Super Admin <strong>Email Address</strong> / <strong>Username</strong> and <strong>New Password</strong>. Only the authorized Super Admin account is permitted to update these credentials.
                     </p>
                   </div>
 
-                  {adminCredsSuccess && (
-                    <div className="bg-emerald-50 border-2 border-emerald-500 text-emerald-950 p-3 rounded-2xl text-xs font-bold flex items-center gap-2">
-                      <CheckCircle className="w-4 h-4 text-emerald-600" />
-                      <span>سپر ایڈمن کا یوزر نیم اور پاس ورڈ کامیابی سے اپ ڈیٹ ہو گیا!</span>
+                  {adminCredsError && (
+                    <div
+                      role="alert"
+                      className="bg-red-50 border-2 border-red-400 text-red-900 p-3 rounded-2xl text-xs font-bold flex items-center gap-2"
+                    >
+                      <AlertTriangle className="w-4 h-4 text-red-600 shrink-0" />
+                      <span>{adminCredsError}</span>
                     </div>
                   )}
 
-                  <form onSubmit={handleResetAdminCredentials} className="bg-white border-2 border-stone-200 rounded-3xl p-5 space-y-4 shadow-sm">
+                  {adminCredsSuccess && (
+                    <div
+                      role="status"
+                      className="bg-emerald-50 border-2 border-emerald-500 text-emerald-950 p-3 rounded-2xl text-xs font-bold flex items-center gap-2"
+                    >
+                      <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span>Super Admin Username and Password have been updated successfully!</span>
+                    </div>
+                  )}
+
+                  <form
+                    onSubmit={handleResetAdminCredentials}
+                    className="bg-white border-2 border-stone-200 rounded-3xl p-5 space-y-4 shadow-sm"
+                    noValidate
+                  >
                     <div>
                       <label className="block text-xs font-bold text-stone-800 mb-1">
-                        نیا ایڈمن یوزر نیم (Username):
+                        Email Address
                       </label>
                       <input
-                        type="text"
+                        type="email"
                         value={newAdminUser}
                         onChange={(e) => setNewAdminUser(e.target.value)}
-                        placeholder="مثلاً: admin"
-                        className="w-full px-3.5 py-2.5 border rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                        placeholder="Enter authorized admin email address"
+                        className="w-full px-3.5 py-2.5 border rounded-xl font-sans text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
                         required
                       />
                     </div>
 
                     <div>
                       <label className="block text-xs font-bold text-stone-800 mb-1">
-                        نیا ایڈمن پاس ورڈ یا پن کوڈ (Password / PIN):
+                        New Password
                       </label>
                       <input
                         type="password"
                         value={newAdminPin}
                         onChange={(e) => setNewAdminPin(e.target.value)}
-                        placeholder="اپنا نیا محفوظ پاس ورڈ درج کریں"
-                        className="w-full px-3.5 py-2.5 border rounded-xl font-mono text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
+                        placeholder="Enter your new password"
+                        className="w-full px-3.5 py-2.5 border rounded-xl font-sans text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
                         required
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-stone-800 mb-1">
+                        Confirm New Password
+                      </label>
+                      <input
+                        type="password"
+                        value={confirmAdminPin}
+                        onChange={(e) => setConfirmAdminPin(e.target.value)}
+                        placeholder="Re-enter your new password"
+                        className="w-full px-3.5 py-2.5 border rounded-xl font-sans text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
                       />
                     </div>
 
@@ -1175,7 +1281,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs shadow flex items-center justify-center gap-1.5 transition cursor-pointer"
                       >
                         <Save className="w-4 h-4" />
-                        <span>نئے کوائف محفوظ کریں</span>
+                        <span>Reset Password</span>
                       </button>
                     </div>
                   </form>
@@ -2041,14 +2147,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
               {/* TAB 6: CREDENTIALS (Distinct Usernames & Passwords for each Mosque & School) */}
               {activeTab === 'credentials' && (
-                <div className="space-y-4 font-nastaliq text-xs">
+                <div
+                  dir="ltr"
+                  lang="en"
+                  className="space-y-4 font-sans text-xs text-left"
+                >
                   <div className="p-3.5 bg-indigo-50 rounded-2xl border border-indigo-200 text-indigo-950 space-y-1">
-                    <span className="font-bold text-sm block flex items-center gap-1.5">
+                    <span className="font-bold text-sm flex items-center gap-1.5">
                       <KeyRound className="w-4 h-4 text-indigo-700" />
-                      <span>ہر مسجد اور اسکول کا الگ الگ یوزر نیم اور پاس ورڈ:</span>
+                      <span>Section Manager Account Credentials (Username & Password)</span>
                     </span>
                     <p className="leading-relaxed">
-                      سپر ایڈمن یہاں سے ہر مسجد کے امام اور اسکول کے پرنسپل کو الگ خفیہ یوزر نیم اور پاس ورڈ دے سکتے ہیں تاکہ کوئی دوسرا ان کا ٹائم ٹیبل تبدیل نہ کر سکے۔
+                      Assign dedicated <strong>Username</strong> and <strong>Password</strong> credentials to each Mosque, School, Hospital, and Transport route manager so they can sign in and update their schedules securely.
                     </p>
                   </div>
 
@@ -2056,83 +2166,81 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   <div className="space-y-3">
                     <h4 className="font-bold text-sm text-emerald-950 flex items-center gap-1.5">
                       <Compass className="w-4 h-4 text-emerald-800" />
-                      <span>مساجد کے یوزر نیم و پاس ورڈز:</span>
+                      <span>Mosque Credentials (Username & Password)</span>
                     </h4>
 
-                    {mosques.map((m) => {
-                      const userKey = `mosque-u-${m.id}`;
-                      const passKey = `mosque-p-${m.id}`;
-                      return (
-                        <div
-                          key={m.id}
-                          className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 space-y-2.5"
-                        >
-                          <div className="flex items-center justify-between">
-                            <strong className="text-stone-900 text-xs sm:text-sm">{m.name}</strong>
-                            <span className="text-[11px] text-stone-600 font-bold">امام: {m.imamName}</span>
+                    {mosques.map((m) => (
+                      <div
+                        key={m.id}
+                        className="p-3.5 bg-stone-50 rounded-2xl border border-stone-200 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between">
+                          <strong className="text-stone-900 text-xs sm:text-sm">{m.name}</strong>
+                          <span className="text-[11px] text-stone-600 font-bold">Imam: {m.imamName}</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Username</label>
+                            <input
+                              type="text"
+                              defaultValue={m.username || `mosque_${m.id}`}
+                              id={`user-mosque-${m.id}`}
+                              placeholder="Enter username"
+                              className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
+                            />
                           </div>
-
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                            <div>
-                              <span className="text-[10px] text-stone-600 block">یوزر نیم:</span>
-                              <input
-                                type="text"
-                                defaultValue={m.username || `mosque_${m.id}`}
-                                id={`user-mosque-${m.id}`}
-                                className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
-                              />
-                            </div>
-                            <div>
-                              <span className="text-[10px] text-stone-600 block">پاس ورڈ:</span>
-                              <input
-                                type="text"
-                                defaultValue={m.password || 'mosque123'}
-                                id={`pass-mosque-${m.id}`}
-                                className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
-                              />
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const u = (document.getElementById(`user-mosque-${m.id}`) as HTMLInputElement)?.value;
-                                const p = (document.getElementById(`pass-mosque-${m.id}`) as HTMLInputElement)?.value;
-                                if (onUpdateMosqueCredentials && u && p) {
-                                  onUpdateMosqueCredentials(m.id, u.trim(), p.trim());
-                                  alert(`مسجد "${m.name}" کا پاس ورڈ کامیابی سے محفوظ ہو گیا!\nیوزر: ${u}\nپاس ورڈ: ${p}`);
-                                }
-                              }}
-                              className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1"
-                            >
-                              <Save className="w-3.5 h-3.5" />
-                              <span>پاس ورڈ محفوظ کریں</span>
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                const u = (document.getElementById(`user-mosque-${m.id}`) as HTMLInputElement)?.value;
-                                const p = (document.getElementById(`pass-mosque-${m.id}`) as HTMLInputElement)?.value;
-                                handleCopyCredentials(`مسجد: ${m.name}\nیوزر نیم: ${u}\nپاس ورڈ: ${p}\nپورٹل: رتہ کلاں جھنگ`, m.id);
-                              }}
-                              className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl text-xs cursor-pointer flex items-center gap-1"
-                            >
-                              {copiedKey === m.id ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
-                              <span>{copiedKey === m.id ? 'کاپی ہو گیا' : 'امام کو بھیجنے کے لیے کاپی کریں'}</span>
-                            </button>
+                          <div>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Password</label>
+                            <input
+                              type="text"
+                              defaultValue={m.password || 'mosque123'}
+                              id={`pass-mosque-${m.id}`}
+                              placeholder="Enter password"
+                              className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
+                            />
                           </div>
                         </div>
-                      );
-                    })}
+
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const u = (document.getElementById(`user-mosque-${m.id}`) as HTMLInputElement)?.value;
+                              const p = (document.getElementById(`pass-mosque-${m.id}`) as HTMLInputElement)?.value;
+                              if (onUpdateMosqueCredentials && u && p) {
+                                onUpdateMosqueCredentials(m.id, u.trim(), p.trim());
+                                alert(`Credentials saved for "${m.name}".\nUsername: ${u}\nPassword: ${p}`);
+                              }
+                            }}
+                            className="px-3.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Reset Password</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const u = (document.getElementById(`user-mosque-${m.id}`) as HTMLInputElement)?.value;
+                              const p = (document.getElementById(`pass-mosque-${m.id}`) as HTMLInputElement)?.value;
+                              handleCopyCredentials(`Mosque: ${m.name}\nUsername: ${u}\nPassword: ${p}\nPortal: Ratta Kallan e-Portal`, m.id);
+                            }}
+                            className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl text-xs cursor-pointer flex items-center gap-1"
+                          >
+                            {copiedKey === m.id ? <Check className="w-3.5 h-3.5 text-emerald-700" /> : <Copy className="w-3.5 h-3.5" />}
+                            <span>{copiedKey === m.id ? 'Copied' : 'Copy Credentials'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
 
                   {/* Institutes Section */}
                   <div className="space-y-3 pt-3 border-t border-stone-200">
                     <h4 className="font-bold text-sm text-blue-950 flex items-center gap-1.5">
                       <GraduationCap className="w-4 h-4 text-blue-800" />
-                      <span>اسکولز و کالجز کے یوزر نیم و پاس ورڈز:</span>
+                      <span>School & Institute Credentials (Username & Password)</span>
                     </h4>
 
                     {institutes.map((inst) => (
@@ -2142,25 +2250,27 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       >
                         <div className="flex items-center justify-between">
                           <strong className="text-stone-900 text-xs sm:text-sm">{inst.name}</strong>
-                          <span className="text-[11px] text-stone-600 font-bold">پرنسپل: {inst.headName}</span>
+                          <span className="text-[11px] text-stone-600 font-bold">Principal: {inst.headName}</span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                           <div>
-                            <span className="text-[10px] text-stone-600 block">یوزر نیم:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Username</label>
                             <input
                               type="text"
                               defaultValue={inst.username || `inst_${inst.id}`}
                               id={`user-inst-${inst.id}`}
+                              placeholder="Enter username"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
                           <div>
-                            <span className="text-[10px] text-stone-600 block">پاس ورڈ:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Password</label>
                             <input
                               type="text"
                               defaultValue={inst.password || 'school123'}
                               id={`pass-inst-${inst.id}`}
+                              placeholder="Enter password"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
@@ -2174,13 +2284,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               const p = (document.getElementById(`pass-inst-${inst.id}`) as HTMLInputElement)?.value;
                               if (onUpdateInstituteCredentials && u && p) {
                                 onUpdateInstituteCredentials(inst.id, u.trim(), p.trim());
-                                alert(`ادارے "${inst.name}" کا پاس ورڈ محفوظ ہو گیا!\nیوزر: ${u}\nپاس ورڈ: ${p}`);
+                                alert(`Credentials saved for "${inst.name}".\nUsername: ${u}\nPassword: ${p}`);
                               }
                             }}
                             className="px-3.5 py-1.5 bg-blue-700 hover:bg-blue-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1"
                           >
                             <Save className="w-3.5 h-3.5" />
-                            <span>اسکول پاس ورڈ محفوظ کریں</span>
+                            <span>Reset Password</span>
                           </button>
 
                           <button
@@ -2188,12 +2298,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             onClick={() => {
                               const u = (document.getElementById(`user-inst-${inst.id}`) as HTMLInputElement)?.value;
                               const p = (document.getElementById(`pass-inst-${inst.id}`) as HTMLInputElement)?.value;
-                              handleCopyCredentials(`اسکول: ${inst.name}\nیوزر نیم: ${u}\nپاس ورڈ: ${p}\nپورٹل: رتہ کلاں جھنگ`, inst.id);
+                              handleCopyCredentials(`School: ${inst.name}\nUsername: ${u}\nPassword: ${p}\nPortal: Ratta Kallan e-Portal`, inst.id);
                             }}
                             className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl text-xs cursor-pointer flex items-center gap-1"
                           >
                             {copiedKey === inst.id ? <Check className="w-3.5 h-3.5 text-blue-700" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{copiedKey === inst.id ? 'کاپی ہو گیا' : 'پرنسپل کو بھیجنے کے لیے کاپی کریں'}</span>
+                            <span>{copiedKey === inst.id ? 'Copied' : 'Copy Credentials'}</span>
                           </button>
                         </div>
                       </div>
@@ -2204,7 +2314,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   <div className="space-y-3 pt-3 border-t border-stone-200">
                     <h4 className="font-bold text-sm text-red-950 flex items-center gap-1.5">
                       <HeartPulse className="w-4 h-4 text-red-700" />
-                      <span>ہسپتال، کلینکس اور ایمبولینس کے سب-لاگ ان پاس ورڈز:</span>
+                      <span>Hospital & Emergency Service Credentials (Username & Password)</span>
                     </h4>
 
                     {hospitals.map((hosp) => (
@@ -2219,20 +2329,22 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                           <div>
-                            <span className="text-[10px] text-stone-600 block">یوزر نیم:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Username</label>
                             <input
                               type="text"
                               defaultValue={hosp.username || `hosp_${hosp.id}`}
                               id={`user-hosp-${hosp.id}`}
+                              placeholder="Enter username"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
                           <div>
-                            <span className="text-[10px] text-stone-600 block">پاس ورڈ:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Password</label>
                             <input
                               type="text"
                               defaultValue={hosp.password || 'hosp123'}
                               id={`pass-hosp-${hosp.id}`}
+                              placeholder="Enter password"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
@@ -2246,13 +2358,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               const p = (document.getElementById(`pass-hosp-${hosp.id}`) as HTMLInputElement)?.value;
                               if (onSaveHospital && u && p) {
                                 onSaveHospital({ ...hosp, username: u.trim(), password: p.trim() });
-                                alert(`ہسپتال/سروس "${hosp.name}" کا پاس ورڈ محفوظ ہو گیا!\nیوزر: ${u}\nپاس ورڈ: ${p}`);
+                                alert(`Credentials saved for "${hosp.name}".\nUsername: ${u}\nPassword: ${p}`);
                               }
                             }}
                             className="px-3.5 py-1.5 bg-red-700 hover:bg-red-800 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1"
                           >
                             <Save className="w-3.5 h-3.5" />
-                            <span>پاس ورڈ محفوظ کریں</span>
+                            <span>Reset Password</span>
                           </button>
 
                           <button
@@ -2260,12 +2372,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             onClick={() => {
                               const u = (document.getElementById(`user-hosp-${hosp.id}`) as HTMLInputElement)?.value;
                               const p = (document.getElementById(`pass-hosp-${hosp.id}`) as HTMLInputElement)?.value;
-                              handleCopyCredentials(`ہسپتال: ${hosp.name}\nیوزر نیم: ${u}\nپاس ورڈ: ${p}\nپورٹل: رتہ کلاں جھنگ`, hosp.id);
+                              handleCopyCredentials(`Hospital: ${hosp.name}\nUsername: ${u}\nPassword: ${p}\nPortal: Ratta Kallan e-Portal`, hosp.id);
                             }}
                             className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl text-xs cursor-pointer flex items-center gap-1"
                           >
                             {copiedKey === hosp.id ? <Check className="w-3.5 h-3.5 text-red-700" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{copiedKey === hosp.id ? 'کاپی ہو گیا' : 'انچارج کو بھیجنے کے لیے کاپی کریں'}</span>
+                            <span>{copiedKey === hosp.id ? 'Copied' : 'Copy Credentials'}</span>
                           </button>
                         </div>
                       </div>
@@ -2276,7 +2388,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   <div className="space-y-3 pt-3 border-t border-stone-200">
                     <h4 className="font-bold text-sm text-amber-950 flex items-center gap-1.5">
                       <Bus className="w-4 h-4 text-amber-700" />
-                      <span>گاڑیوں و ٹرانسپورٹ روٹس کے سب-لاگ ان پاس ورڈز:</span>
+                      <span>Transport Route Credentials (Username & Password)</span>
                     </h4>
 
                     {transports.map((veh) => (
@@ -2286,25 +2398,27 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       >
                         <div className="flex items-center justify-between">
                           <strong className="text-stone-900 text-xs sm:text-sm">{veh.title}</strong>
-                          <span className="text-[11px] text-stone-600 font-bold">ڈرائیور: {veh.driverName} ({veh.vehicleNumber})</span>
+                          <span className="text-[11px] text-stone-600 font-bold">Driver: {veh.driverName} ({veh.vehicleNumber})</span>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
                           <div>
-                            <span className="text-[10px] text-stone-600 block">یوزر نیم:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Username</label>
                             <input
                               type="text"
                               defaultValue={veh.username || `trans_${veh.id}`}
                               id={`user-veh-${veh.id}`}
+                              placeholder="Enter username"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
                           <div>
-                            <span className="text-[10px] text-stone-600 block">پاس ورڈ:</span>
+                            <label className="text-[11px] font-bold text-stone-700 block mb-1">Password</label>
                             <input
                               type="text"
                               defaultValue={veh.password || 'van123'}
                               id={`pass-veh-${veh.id}`}
+                              placeholder="Enter password"
                               className="w-full px-3 py-1.5 border rounded-xl bg-white font-mono text-xs"
                             />
                           </div>
@@ -2318,13 +2432,13 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               const p = (document.getElementById(`pass-veh-${veh.id}`) as HTMLInputElement)?.value;
                               if (onSaveTransport && u && p) {
                                 onSaveTransport({ ...veh, username: u.trim(), password: p.trim() });
-                                alert(`گاڑی "${veh.title}" کا پاس ورڈ محفوظ ہو گیا!\nیوزر: ${u}\nپاس ورڈ: ${p}`);
+                                alert(`Credentials saved for "${veh.title}".\nUsername: ${u}\nPassword: ${p}`);
                               }
                             }}
                             className="px-3.5 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold rounded-xl text-xs cursor-pointer shadow-sm flex items-center gap-1"
                           >
                             <Save className="w-3.5 h-3.5" />
-                            <span>پاس ورڈ محفوظ کریں</span>
+                            <span>Reset Password</span>
                           </button>
 
                           <button
@@ -2332,12 +2446,12 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             onClick={() => {
                               const u = (document.getElementById(`user-veh-${veh.id}`) as HTMLInputElement)?.value;
                               const p = (document.getElementById(`pass-veh-${veh.id}`) as HTMLInputElement)?.value;
-                              handleCopyCredentials(`گاڑی: ${veh.title}\nگاڑی نمبر: ${veh.vehicleNumber}\nیوزر نیم: ${u}\nپاس ورڈ: ${p}\nپورٹل: رتہ کلاں جھنگ`, veh.id);
+                              handleCopyCredentials(`Transport: ${veh.title}\nVehicle: ${veh.vehicleNumber}\nUsername: ${u}\nPassword: ${p}\nPortal: Ratta Kallan e-Portal`, veh.id);
                             }}
                             className="px-3 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-800 font-bold rounded-xl text-xs cursor-pointer flex items-center gap-1"
                           >
                             {copiedKey === veh.id ? <Check className="w-3.5 h-3.5 text-amber-700" /> : <Copy className="w-3.5 h-3.5" />}
-                            <span>{copiedKey === veh.id ? 'کاپی ہو گیا' : 'ڈرائیور کو بھیجنے کے لیے کاپی کریں'}</span>
+                            <span>{copiedKey === veh.id ? 'Copied' : 'Copy Credentials'}</span>
                           </button>
                         </div>
                       </div>

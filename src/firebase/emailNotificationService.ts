@@ -265,3 +265,131 @@ export async function dispatchMessageNotificationEmail({
     return false;
   }
 }
+
+function sanitizeHtml(input: string): string {
+  return String(input || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+export interface PasswordResetEmailOptions {
+  email: string;
+  username: string;
+  accountRole?: 'Super Admin' | 'Admin' | 'Profile Owner' | 'Section Manager';
+  portalUrl?: string;
+}
+
+/**
+ * Generates an English-only password reset email template.
+ */
+export function generatePasswordResetEmailTemplate({
+  email,
+  username,
+  accountRole = 'Profile Owner',
+  portalUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ratta-kallan.web.app',
+}: PasswordResetEmailOptions): { subject: string; html: string; text: string } {
+  const safeUsername = sanitizeHtml(username || email);
+  const safeRole = sanitizeHtml(accountRole);
+  const resetLink = `${portalUrl}/?reset_password=1&username=${encodeURIComponent(username || email)}`;
+
+  const subject = `[Ratta Kallan Portal] Password Reset Request for ${safeUsername}`;
+
+  const text = `
+Ratta Kallan e-Portal — Password Reset Instructions
+------------------------------------------------------------
+Hello ${safeUsername} (${safeRole}),
+
+We received a request to reset the password for your Ratta Kallan e-Portal account associated with ${email}.
+
+To reset your password, please open the link below or return to the portal's Reset Password screen:
+${resetLink}
+
+If you did not request a password reset, please ignore this email. Your existing password will remain unchanged.
+
+Thank you,
+Ratta Kallan Portal Security Team
+  `.trim();
+
+  const html = `
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reset Password - Ratta Kallan Portal</title>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f4f6f3; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #1c1917;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="background-color: #f4f6f3; padding: 24px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width: 560px; background-color: #ffffff; border-radius: 16px; overflow: hidden; box-shadow: 0 8px 24px rgba(6, 78, 59, 0.12); border: 2px solid #059669;">
+          <tr>
+            <td style="background: linear-gradient(135deg, #064e3b 0%, #047857 100%); padding: 24px; text-align: left; color: #ffffff;">
+              <div style="font-size: 12px; color: #fde68a; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;">
+                Ratta Kallan e-Portal Security
+              </div>
+              <h1 style="margin: 6px 0 0; font-size: 22px; font-weight: bold; color: #ffffff;">
+                Reset Password Instructions
+              </h1>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding: 24px; text-align: left; direction: ltr;">
+              <p style="margin: 0 0 14px; font-size: 15px; color: #1c1917; line-height: 1.6;">
+                Hello <strong>${safeUsername}</strong> (${safeRole}),
+              </p>
+              <p style="margin: 0 0 16px; font-size: 14px; color: #44403c; line-height: 1.6;">
+                We received a request to reset the password for your account linked to <strong>${sanitizeHtml(email)}</strong>. Click the button below to verify and set your new password:
+              </p>
+              <div style="margin: 24px 0; text-align: center;">
+                <a href="${resetLink}" style="display: inline-block; background-color: #047857; color: #ffffff; font-weight: bold; font-size: 15px; text-decoration: none; padding: 12px 28px; border-radius: 10px;">
+                  Reset Password
+                </a>
+              </div>
+              <p style="margin: 0; font-size: 12px; color: #78716c; line-height: 1.5;">
+                If you did not request a password reset, you can safely ignore this email. Your account remains secure.
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>
+  `.trim();
+
+  return { subject, html, text };
+}
+
+/**
+ * Dispatches an English-only password reset email record to the 'mail' collection.
+ */
+export async function dispatchPasswordResetEmail(options: PasswordResetEmailOptions): Promise<boolean> {
+  const cleanEmail = options.email?.trim();
+  if (!cleanEmail || !cleanEmail.includes('@')) return false;
+
+  const { subject, html, text } = generatePasswordResetEmailTemplate(options);
+  try {
+    await addDoc(collection(db, 'mail'), {
+      to: [cleanEmail],
+      message: {
+        subject,
+        text,
+        html,
+      },
+      type: 'password_reset',
+      username: options.username,
+      accountRole: options.accountRole || 'Profile Owner',
+      createdAt: new Date().toISOString(),
+    });
+    return true;
+  } catch (err) {
+    console.warn('[EmailService] Could not queue password reset email in Firestore:', err);
+    return false;
+  }
+}
+

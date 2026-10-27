@@ -428,7 +428,7 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                 گاؤں کی پروفائل یا دکان سے متعلق تمام موصول شدہ و بھیجے گئے پیغامات دیکھنے کے لیے اوپر اپنا موبائل نمبر لکھیں، یا پاس ورڈ کے ذریعے لاگ ان ہوں۔
               </p>
               {onOpenLoginModal && (
-                <div className="pt-2">
+                <div className="pt-2 font-sans" dir="ltr" lang="en">
                   <button
                     onClick={() => {
                       onClose();
@@ -436,7 +436,7 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                     }}
                     className="px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-md cursor-pointer transition"
                   >
-                    پروفائل لاگ ان کھولیں
+                    Sign In
                   </button>
                 </div>
               )}

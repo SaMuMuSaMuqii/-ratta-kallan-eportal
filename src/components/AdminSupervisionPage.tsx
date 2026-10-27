@@ -64,6 +64,9 @@ import {
 import {
   verifyRoleAndOwnershipPermission,
   isAuthorizedSuperAdminResetEmail,
+  verifySuperAdminCredentials,
+  verifySuperAdminPasswordOnly,
+  saveSuperAdminCredentials,
 } from '../utils/privacySanitizer';
 import {
   auth,
@@ -72,6 +75,7 @@ import {
   updatePassword,
   isFirebaseConfigured,
 } from '../firebase/config';
+import { dispatchPasswordResetEmail } from '../firebase/emailNotificationService';
 
 const SESSION_ADMIN_CRED_CACHE_KEY = 'rk_admin_session_reauth_verifier_v1';
 const LOCAL_ADMIN_PASS_VERIFIER_MAP_KEY = 'rk_admin_email_pass_verifier_v1';
@@ -308,7 +312,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     operation: 'open_admin_screen',
   });
 
-  // Handle Admin Sign-In via Email + Password
+  // Handle Admin Sign-In via Email / Username + Password
   const handleAdminSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError('');
@@ -317,17 +321,58 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     const enteredPass = loginPassword.trim();
 
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setLoginError('براہ کرم درست ای میل ایڈریس درج کریں۔');
+      setLoginError('Please enter a valid Email Address.');
       return;
     }
-    if (!enteredPass || enteredPass.length < 6) {
-      setLoginError('براہ کرم اپنا پاس ورڈ درج کریں (کم از کم 6 حروف)۔');
+    if (!enteredPass || enteredPass.length < 4) {
+      setLoginError('Please enter your Password.');
       return;
     }
 
     setIsSigningIn(true);
     try {
       let uid = bootstrapUid.trim() || `uid-${cleanEmail.replace(/[^a-z0-9]/g, '_')}`;
+
+      // Direct Super Admin Verification (digitalworldonline777@gmail.com + samumusa@1999 or updated password)
+      if (verifySuperAdminCredentials(cleanEmail, enteredPass)) {
+        const superAdminRoleDoc: RoleAssignmentDoc = {
+          uid,
+          email: cleanEmail,
+          name: 'Samar Saeed (Super Admin)',
+          admin: true,
+          updatedAt: new Date().toISOString(),
+          updatedBy: 'super-admin',
+        };
+        await saveRoleAssignmentToFirestore(superAdminRoleDoc);
+        setStoredEmailVerifier(cleanEmail, enteredPass);
+        try {
+          sessionStorage.setItem(
+            SESSION_ADMIN_CRED_CACHE_KEY,
+            btoa(unescape(encodeURIComponent(enteredPass)))
+          );
+        } catch {}
+
+        const adminSession: AuthUserSession = {
+          type: 'admin',
+          id: uid,
+          uid,
+          username: 'Super Admin',
+          name: 'Samar Saeed (Super Admin)',
+          email: cleanEmail,
+          loginTime: new Date().toISOString(),
+          roles: {
+            admin: true,
+            alertManager: true,
+            mosqueEditor: true,
+            schoolEditor: true,
+            hospitalEditor: true,
+            transportEditor: true,
+          },
+        };
+        onAdminLoginSuccess(adminSession);
+        setIsSigningIn(false);
+        return;
+      }
 
       if (isFirebaseConfigured()) {
         try {
@@ -342,7 +387,16 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       const savedPassForEmail = getStoredEmailVerifier(cleanEmail);
       if (savedPassForEmail && savedPassForEmail !== enteredPass) {
         setLoginError(
-          'غلط پاس ورڈ! اگر آپ پاس ورڈ بھول گئے ہیں یا تبدیل کرنا چاہتے ہیں تو نیچے "پاس ورڈ تبدیل / ری سیٹ کریں" بٹن دبائیں۔'
+          'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" below.'
+        );
+        setIsSigningIn(false);
+        return;
+      }
+
+      // If user entered the Super Admin email with an incorrect password, reject immediately
+      if (isAuthorizedSuperAdminResetEmail(cleanEmail)) {
+        setLoginError(
+          'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" below.'
         );
         setIsSigningIn(false);
         return;
@@ -380,8 +434,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
         type: 'admin',
         id: matchedRoleDoc.uid || uid,
         uid: matchedRoleDoc.uid || uid,
-        username: matchedRoleDoc.name || cleanEmail.split('@')[0],
-        name: matchedRoleDoc.name || 'پورٹل ایڈمن',
+        username: matchedRoleDoc.name || 'Portal Admin',
+        name: matchedRoleDoc.name || 'Portal Admin',
         email: cleanEmail,
         loginTime: new Date().toISOString(),
         roles: {
@@ -396,7 +450,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       };
       onAdminLoginSuccess(adminSession);
     } catch (err: any) {
-      setLoginError(err.message || 'لاگ ان میں مسئلہ پیش آیا۔');
+      setLoginError(err.message || 'Sign in failed. Please check your credentials and try again.');
     } finally {
       setIsSigningIn(false);
     }
@@ -407,22 +461,22 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     const cleanEmail = loginEmail.trim().toLowerCase();
     const cleanUid = (bootstrapUid.trim() || `uid-${cleanEmail.replace(/[^a-z0-9]/g, '_')}`).trim();
     if (!cleanEmail || !cleanEmail.includes('@')) {
-      setLoginError('پہلے اوپر اپنا ای میل ایڈریس لکھیں۔');
+      setLoginError('Please enter your Email Address above first.');
       return;
     }
     if (!isAuthorizedSuperAdminResetEmail(cleanEmail)) {
       setLoginError(
-        'صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل ایکٹیویٹ یا پاس ورڈ ری سیٹ کر سکتی ہے۔ باقی صارفین صرف اپنی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔'
+        'Access Denied: Only the authorized Super Admin email address can activate the Admin role or reset the Admin password.'
       );
       return;
     }
     const newRoleDoc: RoleAssignmentDoc = {
       uid: cleanUid,
       email: cleanEmail,
-      name: cleanEmail.split('@')[0],
+      name: 'Samar Saeed (Super Admin)',
       admin: true,
       updatedAt: new Date().toISOString(),
-      updatedBy: cleanEmail,
+      updatedBy: 'super-admin',
     };
     await saveRoleAssignmentToFirestore(newRoleDoc);
     if (loginPassword.trim().length >= 6) {
@@ -431,14 +485,14 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     setRoleMap(getLocalRolesCollection());
     setLoginError('');
     setLoginSuccessNotice(
-      `✓ ای میل (${cleanEmail}) کے لیے roles کلیکشن میں admin: true محفوظ ہو گیا ہے! اب اوپر اپنا پاس ورڈ لکھ کر "ایڈمن سائن ان کریں" بٹن دبائیں۔`
+      'Admin role (admin: true) has been registered. Now enter your Password above and click "Sign In".'
     );
   };
 
   // Open Admin Password Change / Reset Modal
   const openAdminPasswordModal = (defaultTab: 'change' | 'email_reset' = 'change') => {
     setPwdModalTab(defaultTab);
-    setPwdTargetEmail((activeSession?.email || loginEmail || '').trim().toLowerCase());
+    setPwdTargetEmail('');
     setCurrentPasswordInput('');
     setNewPasswordInput('');
     setConfirmNewPasswordInput('');
@@ -459,41 +513,41 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     if (!targetEmail || !targetEmail.includes('@')) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'براہ کرم اپنا ایڈمن ای میل ایڈریس درج کریں۔',
+        text: 'Please enter a valid Admin Email Address.',
       });
       return;
     }
     if (!isAuthorizedSuperAdminResetEmail(targetEmail)) {
       setPwdStatusMessage({
         type: 'error',
-        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) کو ہی ایڈمن پینل کا پاس ورڈ تبدیل یا ری سیٹ کرنے کی اجازت ہے۔ باقی تمام صارفین صرف اپنی ذاتی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔',
+        text: 'Access Denied: Only the authorized Super Admin email address is permitted to reset or change the Admin password.',
       });
       return;
     }
     if (!curPass) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'براہ کرم اپنا موجودہ پاس ورڈ درج کریں۔',
+        text: 'Please enter your current Password.',
       });
       return;
     }
     if (newPass.length < 6) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'نیا پاس ورڈ کم از کم 6 حروف یا ہندسوں کا ہونا لازمی ہے۔',
+        text: 'New Password must be at least 6 characters long.',
       });
       return;
     }
     if (newPass !== confirmPass) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'نیا پاس ورڈ اور تصدیقی پاس ورڈ دونوں ایک جیسے ہونے چاہئیں۔',
+        text: 'New Password and Confirm New Password do not match.',
       });
       return;
     }
 
-    // Verify current password against session cache or stored email verifier
-    let currentVerified = false;
+    // Verify current password against Super Admin credentials, session cache, or stored email verifier
+    let currentVerified = verifySuperAdminPasswordOnly(curPass);
     const storedVerifier = getStoredEmailVerifier(targetEmail);
     try {
       const cachedEncoded = sessionStorage.getItem(SESSION_ADMIN_CRED_CACHE_KEY);
@@ -505,15 +559,11 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     if (!currentVerified && storedVerifier) {
       if (curPass === storedVerifier) currentVerified = true;
     }
-    if (!currentVerified && !storedVerifier && curPass.length >= 6) {
-      // First time setting password verifier
-      currentVerified = true;
-    }
 
     if (!currentVerified) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'موجودہ پاس ورڈ درست نہیں ہے! اگر آپ موجودہ پاس ورڈ بھول گئے ہیں تو اوپر "ای میل پر ری سیٹ لنک" ٹیب استعمال کریں۔',
+        text: 'Incorrect current Password. If you forgot your password, switch to the "Forgot Password?" tab above.',
       });
       return;
     }
@@ -527,29 +577,30 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       }
     }
 
-    // Update local email verifier & session re-auth cache
+    // Update local Super Admin credentials, email verifier & session re-auth cache
+    saveSuperAdminCredentials({ pin: newPass });
     setStoredEmailVerifier(targetEmail, newPass);
     try {
       sessionStorage.setItem(SESSION_ADMIN_CRED_CACHE_KEY, btoa(unescape(encodeURIComponent(newPass))));
     } catch {}
 
-    // Record in Admin Audit Log ("ایڈمن لاگ")
+    // Record in Admin Audit Log
     const logItem = await appendAdminLogEntry({
-      adminEmail: targetEmail,
-      adminName: activeSession?.name || targetEmail.split('@')[0],
+      adminEmail: 'Super Admin',
+      adminName: activeSession?.name || 'Super Admin',
       actionType: 'manage_role',
-      actionUrdu: 'ایڈمن نے اپنا پاس ورڈ تبدیل کیا',
-      targetTitle: targetEmail,
+      actionUrdu: 'Admin updated account password',
+      targetTitle: 'Super Admin Account',
     });
     setAdminLogs((prev) => [logItem, ...prev]);
 
-    setLoginPassword(newPass);
+    setLoginPassword('');
     setCurrentPasswordInput('');
     setNewPasswordInput('');
     setConfirmNewPasswordInput('');
     setPwdStatusMessage({
       type: 'success',
-      text: '✓ آپ کا نیا ایڈمن پاس ورڈ کامیابی سے محفوظ ہو گیا ہے! اب آپ اس نئے پاس ورڈ سے لاگ ان اور تصدیق کر سکتے ہیں۔',
+      text: 'Your New Password has been saved successfully! You can now sign in with your updated password.',
     });
   };
 
@@ -561,28 +612,37 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     if (!targetEmail || !targetEmail.includes('@')) {
       setPwdStatusMessage({
         type: 'error',
-        text: 'براہ کرم اپنا درست ایڈمن ای میل ایڈریس لکھیں۔',
+        text: 'Please enter a valid Admin Email Address.',
       });
       return;
     }
     if (!isAuthorizedSuperAdminResetEmail(targetEmail)) {
       setPwdStatusMessage({
         type: 'error',
-        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل کا پاس ورڈ ری سیٹ کر سکتی ہے۔ باقی صارفین ہوم اسکرین پر "لاگ ان / پاس ورڈ ری سیٹ" میں جا کر اپنی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کریں۔',
+        text: 'Access Denied: Only the authorized Super Admin email address is permitted to reset the Admin password.',
       });
       return;
     }
 
     const recoveryNewPass = newPasswordInput.trim();
+    const recoveryConfirmPass = confirmNewPasswordInput.trim();
     if (recoveryNewPass) {
       if (recoveryNewPass.length < 6) {
         setPwdStatusMessage({
           type: 'error',
-          text: 'نیا پاس ورڈ کم از کم 6 حروف کا ہونا لازمی ہے۔',
+          text: 'New Password must be at least 6 characters long.',
+        });
+        return;
+      }
+      if (recoveryConfirmPass && recoveryNewPass !== recoveryConfirmPass) {
+        setPwdStatusMessage({
+          type: 'error',
+          text: 'New Password and Confirm New Password do not match.',
         });
         return;
       }
       // Update stored verifier for this admin email so the admin can immediately sign in with the recovered password
+      saveSuperAdminCredentials({ pin: recoveryNewPass });
       setStoredEmailVerifier(targetEmail, recoveryNewPass);
       try {
         sessionStorage.setItem(
@@ -590,27 +650,30 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
           btoa(unescape(encodeURIComponent(recoveryNewPass)))
         );
       } catch {}
-      setLoginEmail(targetEmail);
-      setLoginPassword(recoveryNewPass);
     }
 
     try {
+      await dispatchPasswordResetEmail({
+        email: targetEmail,
+        username: 'Super Admin',
+        accountRole: 'Super Admin',
+      });
       if (isFirebaseConfigured()) {
         await sendPasswordResetEmail(auth, targetEmail);
       }
       setPwdStatusMessage({
         type: 'success',
         text: recoveryNewPass
-          ? `✓ ای میل (${targetEmail}) کا پاس ورڈ ریکور / ری سیٹ کر دیا گیا ہے اور ری سیٹ لنک بھی بھیج دیا گیا ہے! اب آپ اس نئے پاس ورڈ سے لاگ ان کر سکتے ہیں۔`
-          : `✓ پاس ورڈ ری سیٹ کرنے کا لنک آپ کی ای میل (${targetEmail}) پر بھیج دیا گیا ہے۔ اپنی ای میل کھول کر نیا پاس ورڈ مقرر کریں۔`,
+          ? 'Password reset link sent and your New Password has been saved. You can now sign in.'
+          : 'A password reset link has been sent to your registered email address. Please check your inbox for instructions.',
       });
     } catch (err: any) {
       console.warn('Password reset email dispatch:', err);
       setPwdStatusMessage({
         type: 'success',
         text: recoveryNewPass
-          ? `✓ ای میل (${targetEmail}) کے لیے آپ کا نیا ریکوری پاس ورڈ محفوظ ہو گیا ہے! اب آپ لاگ ان کر سکتے ہیں۔`
-          : `✓ پاس ورڈ ری سیٹ کی درخواست (${targetEmail}) کے لیے مکمل ہو گئی ہے۔ آپ نیچے نیا ریکوری پاس ورڈ لکھ کر فوری ری سیٹ بھی کر سکتے ہیں۔`,
+          ? 'Your New Password has been saved! You can now sign in.'
+          : 'Password reset link dispatched. You may also enter a New Password below to complete recovery.',
       });
     }
   };
@@ -633,26 +696,22 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     if (!pendingDangerousAction || !activeSession) return;
     const entered = reauthPassword.trim();
     if (!entered) {
-      setReauthError('براہ کرم اپنا ایڈمن پاس ورڈ دوبارہ درج کریں۔');
+      setReauthError('Please re-enter your Admin Password to confirm this action.');
       return;
     }
 
-    // Verify password against session verifier or Firebase Auth
-    let verified = false;
+    // Verify password against Super Admin password or session verifier
+    let verified = verifySuperAdminPasswordOnly(entered);
     try {
       const cachedEncoded = sessionStorage.getItem(SESSION_ADMIN_CRED_CACHE_KEY);
       if (cachedEncoded) {
         const expected = decodeURIComponent(escape(atob(cachedEncoded)));
         if (entered === expected) verified = true;
-      } else if (entered.length >= 6) {
-        verified = true;
       }
-    } catch {
-      if (entered.length >= 6) verified = true;
-    }
+    } catch {}
 
     if (!verified) {
-      setReauthError('غلط پاس ورڈ! خطرناک کارروائی کے لیے درست ایڈمن پاس ورڈ لازمی ہے۔');
+      setReauthError('Invalid Password. Please enter your valid Admin Password to continue.');
       return;
     }
 
@@ -675,8 +734,9 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     if (!showPasswordModal) return null;
     return (
       <div
-        dir="rtl"
-        className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 font-nastaliq"
+        dir="ltr"
+        lang="en"
+        className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 font-sans text-left"
       >
         <div className="bg-stone-900 border-2 border-amber-400 rounded-3xl max-w-md w-full overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-emerald-950 to-stone-900 p-4 border-b border-stone-800 flex items-center justify-between">
@@ -684,23 +744,23 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               <KeyRound className="w-6 h-6 shrink-0" />
               <div>
                 <h3 className="text-base sm:text-lg font-bold">
-                  ایڈمن پاس ورڈ ریکوری اور تبدیلی
+                  Reset Password
                 </h3>
                 <p className="text-[11px] text-stone-300">
-                  ای میل ری سیٹ لنک منگوائیں یا نیا ایڈمن پاس ورڈ مقرر کریں
+                  Admin Account Password Recovery & Update
                 </p>
               </div>
             </div>
             <button
               type="button"
               onClick={() => setShowPasswordModal(false)}
-              className="px-2.5 py-1 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl text-xs font-bold cursor-pointer"
+              className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-bold cursor-pointer"
             >
-              بند کریں ✕
+              Back to Sign In
             </button>
           </div>
 
-          {/* Sub-tabs: Change Password vs Email Reset Link */}
+          {/* Sub-tabs: Forgot Password (Send Reset Link) vs Reset Password */}
           <div className="grid grid-cols-2 border-b border-stone-800 bg-stone-950 text-xs">
             <button
               type="button"
@@ -714,7 +774,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   : 'text-stone-300 hover:bg-stone-900'
               }`}
             >
-              📧 پاس ورڈ ریکوری (ای میل ری سیٹ)
+              Forgot Password?
             </button>
             <button
               type="button"
@@ -728,14 +788,15 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   : 'text-stone-300 hover:bg-stone-900'
               }`}
             >
-              🔑 موجودہ پاس ورڈ تبدیل کریں
+              Reset Password
             </button>
           </div>
 
           <div className="p-5 space-y-4">
             {pwdStatusMessage && (
               <div
-                className={`p-3.5 rounded-2xl text-xs leading-loose border ${
+                role="alert"
+                className={`p-3.5 rounded-2xl text-xs leading-relaxed border ${
                   pwdStatusMessage.type === 'success'
                     ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200'
                     : 'bg-red-950/90 border-red-500 text-red-200'
@@ -746,17 +807,17 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             )}
 
             {pwdModalTab === 'change' ? (
-              <form onSubmit={handleChangeAdminPassword} className="space-y-3">
+              <form onSubmit={handleChangeAdminPassword} className="space-y-3" noValidate>
                 {!activeSession && (
                   <div className="space-y-1">
                     <label className="text-xs font-bold text-amber-200 block">
-                      ایڈمن ای میل ایڈریس:
+                      Email Address
                     </label>
                     <input
                       type="email"
                       value={pwdTargetEmail}
                       onChange={(e) => setPwdTargetEmail(e.target.value)}
-                      placeholder="name@example.com"
+                      placeholder="Enter your admin email address"
                       className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white text-left"
                       required
                     />
@@ -765,13 +826,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-amber-200 block">
-                    موجودہ پاس ورڈ لکھیں:
+                    Password
                   </label>
                   <input
                     type={showChangePasswords ? 'text' : 'password'}
                     value={currentPasswordInput}
                     onChange={(e) => setCurrentPasswordInput(e.target.value)}
-                    placeholder="اپنا موجودہ پاس ورڈ درج کریں"
+                    placeholder="Enter your current password"
                     className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white"
                     required
                   />
@@ -779,13 +840,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-emerald-300 block">
-                    نیا پاس ورڈ لکھیں (کم از کم 6 حروف):
+                    New Password
                   </label>
                   <input
                     type={showChangePasswords ? 'text' : 'password'}
                     value={newPasswordInput}
                     onChange={(e) => setNewPasswordInput(e.target.value)}
-                    placeholder="نیا مضبوط پاس ورڈ لکھیں"
+                    placeholder="Enter new password (min. 6 characters)"
                     className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white"
                     required
                   />
@@ -793,13 +854,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
 
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-emerald-300 block">
-                    نیا پاس ورڈ دوبارہ لکھیں (تصدیق):
+                    Confirm New Password
                   </label>
                   <input
                     type={showChangePasswords ? 'text' : 'password'}
                     value={confirmNewPasswordInput}
                     onChange={(e) => setConfirmNewPasswordInput(e.target.value)}
-                    placeholder="نیا پاس ورڈ دوبارہ لکھیں"
+                    placeholder="Re-enter your new password"
                     className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white"
                     required
                   />
@@ -812,7 +873,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                       checked={showChangePasswords}
                       onChange={(e) => setShowChangePasswords(e.target.checked)}
                     />
-                    <span>پاس ورڈ دکھائیں</span>
+                    <span>Show Password</span>
                   </label>
                 </div>
 
@@ -820,36 +881,49 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   type="submit"
                   className="w-full min-h-[48px] bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-sm font-bold shadow cursor-pointer"
                 >
-                  ✓ نیا پاس ورڈ محفوظ کریں
+                  Reset Password
                 </button>
               </form>
             ) : (
-              <form onSubmit={handleSendAdminResetEmail} className="space-y-3">
-                <p className="text-xs text-stone-300 leading-loose">
-                  اگر آپ موجودہ ایڈمن پاس ورڈ بھول گئے ہیں تو اپنی ایڈمن ای میل لکھیں۔ آپ کی ای میل پر ری سیٹ لنک بھیج دیا جائے گا، اور آپ یہاں نیا ریکوری پاس ورڈ بھی رکھ سکتے ہیں:
+              <form onSubmit={handleSendAdminResetEmail} className="space-y-3" noValidate>
+                <p className="text-xs text-stone-300 leading-relaxed">
+                  Enter your authorized Admin <strong>Email Address</strong> to receive a
+                  password reset link, or specify a <strong>New Password</strong> below.
                 </p>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-amber-200 block">
-                    ایڈمن ای میل ایڈریس (Admin Email):
+                    Email Address
                   </label>
                   <input
                     type="email"
                     value={pwdTargetEmail}
                     onChange={(e) => setPwdTargetEmail(e.target.value)}
-                    placeholder="name@example.com"
+                    placeholder="Enter your admin email address"
                     className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white text-left"
                     required
                   />
                 </div>
                 <div className="space-y-1">
                   <label className="text-xs font-bold text-emerald-300 block">
-                    نیا ریکوری پاس ورڈ لکھیں (اختیاری — فوری ری سیٹ کے لیے کم از کم 6 حروف):
+                    New Password
                   </label>
                   <input
                     type={showChangePasswords ? 'text' : 'password'}
                     value={newPasswordInput}
                     onChange={(e) => setNewPasswordInput(e.target.value)}
-                    placeholder="نیا پاس ورڈ لکھیں (یا صرف ای میل لنک کے لیے خالی چھوڑیں)"
+                    placeholder="Optional: Enter new password (min. 6 characters)"
+                    className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white"
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-emerald-300 block">
+                    Confirm New Password
+                  </label>
+                  <input
+                    type={showChangePasswords ? 'text' : 'password'}
+                    value={confirmNewPasswordInput}
+                    onChange={(e) => setConfirmNewPasswordInput(e.target.value)}
+                    placeholder="Optional: Confirm your new password"
                     className="w-full min-h-[44px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-sans text-white"
                   />
                 </div>
@@ -858,7 +932,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   className="w-full min-h-[48px] bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-sm font-bold shadow flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <Mail className="w-4 h-4" />
-                  <span>ای میل پر ری سیٹ لنک بھیجیں اور پاس ورڈ ریکور کریں</span>
+                  <span>Send Reset Link</span>
                 </button>
               </form>
             )}
@@ -869,13 +943,14 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
   };
 
   // ============================================================================
-  // CASE 1: SIGNED IN WITHOUT ADMIN ROLE -> SHOW ONLY "آپ کو اجازت نہیں"
+  // CASE 1: SIGNED IN WITHOUT ADMIN ROLE -> SHOW ACCESS DENIED IN ENGLISH
   // ============================================================================
   if (activeSession && !permCheck.allowed) {
     return (
       <div
-        dir="rtl"
-        className="min-h-screen bg-stone-950 text-white flex flex-col items-center justify-center p-4 font-nastaliq"
+        dir="ltr"
+        lang="en"
+        className="min-h-screen bg-stone-950 text-white flex flex-col items-center justify-center p-4 font-sans text-left"
       >
         <div className="bg-red-950/90 border-2 border-red-500 rounded-3xl p-8 max-w-md w-full text-center space-y-5 shadow-2xl">
           <div className="w-16 h-16 rounded-full bg-red-600/30 border-2 border-red-400 flex items-center justify-center mx-auto">
@@ -883,27 +958,30 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
           </div>
           <h1
             data-testid="admin-permission-denied"
-            className="text-3xl font-bold text-red-200 leading-relaxed"
+            className="text-2xl font-bold text-red-200 leading-snug"
           >
-            آپ کو اجازت نہیں
+            Access Denied
           </h1>
-          <p className="text-sm text-red-100/90 leading-loose">
-            یہ صفحہ صرف پورٹل ایڈمن کے لیے ہے جس کے پاس Firestore کی <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">roles</code> کلیکشن میں <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">admin: true</code> موجود ہو۔
+          <p className="text-sm text-red-100/90 leading-relaxed">
+            This supervision console is restricted to authorized administrators with{' '}
+            <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">admin: true</code> in
+            the <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">roles</code>{' '}
+            collection.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
               type="button"
               onClick={onBackToPortal}
-              className="flex-1 min-h-[52px] bg-white text-stone-950 rounded-2xl font-bold text-base hover:bg-stone-200 transition cursor-pointer"
+              className="flex-1 min-h-[48px] bg-white text-stone-950 rounded-2xl font-bold text-sm hover:bg-stone-200 transition cursor-pointer"
             >
-              واپس ہوم پیج پر جائیں
+              Back to Sign In
             </button>
             <button
               type="button"
               onClick={onLogout}
-              className="flex-1 min-h-[52px] bg-red-700 hover:bg-red-600 text-white rounded-2xl font-bold text-base transition cursor-pointer"
+              className="flex-1 min-h-[48px] bg-red-700 hover:bg-red-600 text-white rounded-2xl font-bold text-sm transition cursor-pointer"
             >
-              لاگ آؤٹ کریں
+              Sign Out
             </button>
           </div>
         </div>
@@ -917,8 +995,9 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
   if (!activeSession) {
     return (
       <div
-        dir="rtl"
-        className="min-h-screen bg-gradient-to-b from-stone-950 via-emerald-950 to-stone-950 text-white flex flex-col items-center justify-center p-4 font-nastaliq"
+        dir="ltr"
+        lang="en"
+        className="min-h-screen bg-gradient-to-b from-stone-950 via-emerald-950 to-stone-950 text-white flex flex-col items-center justify-center p-4 font-sans text-left"
       >
         <div className="w-full max-w-lg bg-stone-900 border-2 border-amber-500/80 rounded-3xl overflow-hidden shadow-2xl">
           <div className="bg-gradient-to-r from-emerald-900 to-stone-900 p-5 border-b border-stone-800 flex items-center justify-between">
@@ -927,8 +1006,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                 <ShieldCheck className="w-7 h-7" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-amber-300">ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری</h1>
-                <p className="text-xs text-stone-300">رتہ کلاں پورٹل — مکمل نگرانی اور کنٹرول (#admin)</p>
+                <h1 className="text-xl font-bold text-amber-300">Admin Sign In & Password Reset</h1>
+                <p className="text-xs text-stone-300">Ratta Kallan e-Portal — Supervision Console (#admin)</p>
               </div>
             </div>
             <button
@@ -937,38 +1016,38 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               className="px-3 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <ArrowRight className="w-4 h-4" />
-              <span>ہوم پیج</span>
+              <span>Back to Portal</span>
             </button>
           </div>
 
-          <form onSubmit={handleAdminSignIn} className="p-5 sm:p-6 space-y-4">
-            <div className="bg-stone-950/90 border border-stone-700 rounded-2xl p-3.5 text-xs text-stone-300 leading-loose">
-              ایڈمن عام صارف کی طرح اپنی <strong className="text-amber-300">ای میل اور پاس ورڈ</strong> سے سائن ان کرتا ہے۔ کوڈ میں کوئی پاس ورڈ یا پن محفوظ نہیں۔ صرف وہی اکاؤنٹ ایڈمن ڈیش بورڈ کھول سکتا ہے جس کے لیے Firestore کی <code className="font-mono text-emerald-300">roles</code> کلیکشن میں <code className="font-mono text-emerald-300">admin: true</code> درج ہو۔
+          <form onSubmit={handleAdminSignIn} className="p-5 sm:p-6 space-y-4" noValidate>
+            <div className="bg-stone-950/90 border border-stone-700 rounded-2xl p-3.5 text-xs text-stone-300 leading-relaxed">
+              Sign in with your authorized Admin <strong className="text-amber-300">Email Address</strong> and <strong className="text-amber-300">Password</strong>. Only accounts with <code className="font-mono text-emerald-300">admin: true</code> in the Firestore <code className="font-mono text-emerald-300">roles</code> collection are permitted.
             </div>
 
             {loginError && (
-              <div className="p-3.5 bg-red-950 border border-red-500 rounded-2xl text-xs text-red-200 flex items-center gap-2">
+              <div role="alert" className="p-3.5 bg-red-950 border border-red-500 rounded-2xl text-xs text-red-200 flex items-center gap-2">
                 <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
                 <span>{loginError}</span>
               </div>
             )}
 
             {loginSuccessNotice && (
-              <div className="p-3.5 bg-emerald-950 border border-emerald-500 rounded-2xl text-xs text-emerald-200 flex items-center gap-2">
+              <div role="status" className="p-3.5 bg-emerald-950 border border-emerald-500 rounded-2xl text-xs text-emerald-200 flex items-center gap-2">
                 <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
                 <span>{loginSuccessNotice}</span>
               </div>
             )}
 
             <div className="space-y-1.5">
-              <label className="text-sm font-bold text-amber-200 block">
-                📧 ایڈمن ای میل ایڈریس (Admin Email Login):
+              <label className="text-xs font-bold text-amber-200 block">
+                Email Address
               </label>
               <input
                 type="email"
                 value={loginEmail}
                 onChange={(e) => setLoginEmail(e.target.value)}
-                placeholder="name@example.com"
+                placeholder="Enter your admin email address"
                 className="w-full min-h-[48px] px-4 bg-stone-950 border border-stone-700 rounded-2xl text-sm font-sans text-white text-left focus:outline-none focus:border-amber-400"
                 required
               />
@@ -976,13 +1055,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-bold text-amber-200 block">🔑 ایڈمن پاس ورڈ:</label>
+                <label className="text-xs font-bold text-amber-200 block">Password</label>
                 <button
                   type="button"
                   onClick={() => openAdminPasswordModal('email_reset')}
                   className="text-xs text-amber-300 hover:text-amber-200 underline cursor-pointer font-bold"
                 >
-                  پاس ورڈ بھول گئے؟ ریکور / ری سیٹ کریں
+                  Forgot Password?
                 </button>
               </div>
               <div className="relative">
@@ -990,14 +1069,16 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   type={showLoginPassword ? 'text' : 'password'}
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
-                  placeholder="اپنا پاس ورڈ درج کریں"
-                  className="w-full min-h-[48px] px-4 bg-stone-950 border border-stone-700 rounded-2xl text-sm font-sans text-white focus:outline-none focus:border-amber-400"
+                  placeholder="Enter your password"
+                  className="w-full min-h-[48px] px-4 pr-11 bg-stone-950 border border-stone-700 rounded-2xl text-sm font-sans text-white focus:outline-none focus:border-amber-400"
                   required
                 />
                 <button
                   type="button"
                   onClick={() => setShowLoginPassword((p) => !p)}
-                  className="absolute left-3 top-3 text-stone-400 hover:text-white cursor-pointer"
+                  className="absolute right-3 top-3 text-stone-400 hover:text-white cursor-pointer"
+                  title={showLoginPassword ? 'Hide password' : 'Show password'}
+                  aria-label={showLoginPassword ? 'Hide password' : 'Show password'}
                 >
                   {showLoginPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
                 </button>
@@ -1007,30 +1088,30 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             <button
               type="submit"
               disabled={isSigningIn}
-              className="w-full min-h-[54px] bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-2xl text-base font-bold shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+              className="w-full min-h-[52px] bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-2xl text-sm font-bold shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
             >
               <ShieldCheck className="w-5 h-5" />
-              <span>{isSigningIn ? 'تصدیق ہو رہی ہے...' : 'ای میل اور پاس ورڈ سے ایڈمن سائن ان کریں'}</span>
+              <span>{isSigningIn ? 'Signing In...' : 'Sign In'}</span>
             </button>
 
-            {/* Prominent Admin Password Recovery & Change Password Buttons */}
+            {/* Prominent Admin Password Recovery & Reset Password Buttons */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
               <button
                 type="button"
                 onClick={() => openAdminPasswordModal('email_reset')}
-                className="min-h-[48px] px-3 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white border border-emerald-500 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
+                className="min-h-[46px] px-3 py-2.5 bg-emerald-800 hover:bg-emerald-700 text-white border border-emerald-500 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
               >
                 <Mail className="w-4 h-4 text-amber-300 shrink-0" />
-                <span>📧 ایڈمن پاس ورڈ ریکوری (ای میل ری سیٹ)</span>
+                <span>Send Reset Link</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => openAdminPasswordModal('change')}
-                className="min-h-[48px] px-3 py-2.5 bg-stone-800 hover:bg-stone-700 text-amber-200 border border-amber-500/50 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
+                className="min-h-[46px] px-3 py-2.5 bg-stone-800 hover:bg-stone-700 text-amber-200 border border-amber-500/50 rounded-2xl text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
               >
                 <KeyRound className="w-4 h-4 text-amber-300 shrink-0" />
-                <span>🔑 اپنا ایڈمن پاس ورڈ تبدیل کریں</span>
+                <span>Reset Password</span>
               </button>
             </div>
 
@@ -1040,42 +1121,42 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                 onClick={() => setShowConsoleGuide((v) => !v)}
                 className="w-full py-2.5 px-3 bg-stone-800/80 hover:bg-stone-800 text-amber-300 rounded-xl text-xs font-bold flex items-center justify-between cursor-pointer"
               >
-                <span>📋 Firebase Console میں اپنا ایڈمن ڈاکومنٹ (`roles`) بنانے کا طریقہ</span>
+                <span>Firebase Console Role Setup Guide (`roles`)</span>
                 <span>{showConsoleGuide ? '▲' : '▼'}</span>
               </button>
 
               {showConsoleGuide && (
-                <div className="mt-3 p-4 bg-stone-950 border border-emerald-700/70 rounded-2xl text-xs space-y-2.5 leading-loose text-stone-200">
+                <div className="mt-3 p-4 bg-stone-950 border border-emerald-700/70 rounded-2xl text-xs space-y-2.5 leading-relaxed text-stone-200">
                   <p className="font-bold text-emerald-300">
-                    Firebase Console میں ایڈمن بنانے کے کلک بائی کلک مراحل:
+                    Steps to configure an Admin user in Firebase Console:
                   </p>
                   <ul className="list-decimal list-inside space-y-1">
                     <li>
-                      <strong>Authentication</strong> میں جا کر اپنی ای میل اور پاس ورڈ سے یوزر بنائیں اور اس کا <strong>User UID</strong> کاپی کریں۔
+                      Open <strong>Authentication</strong>, create a user with your Email Address and Password, and copy the <strong>User UID</strong>.
                     </li>
                     <li>
-                      <strong>Firestore Database</strong> کھولیں اور <strong>Start collection</strong> دبائیں۔
+                      Open <strong>Firestore Database</strong> and click <strong>Start collection</strong>.
                     </li>
                     <li>
-                      کلیکشن کا نام بالکل یہ لکھیں: <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">roles</code>
+                      Enter the collection ID: <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">roles</code>
                     </li>
                     <li>
-                      <strong>Document ID</strong> میں اپنا کاپی کیا ہوا <strong>User UID</strong> پیسٹ کریں۔
+                      Paste your copied <strong>User UID</strong> into the <strong>Document ID</strong> field.
                     </li>
                     <li>
-                      فیلڈ کا نام <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">admin</code> رکھیں، ٹائپ <strong>boolean</strong> منتخب کریں، اور ویلیو <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">true</code> کر کے Save کر دیں۔
+                      Add a boolean field named <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">admin</code> with value <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">true</code> and save.
                     </li>
                   </ul>
 
                   <div className="pt-2 border-t border-stone-800 space-y-2">
                     <p className="text-[11px] text-amber-200">
-                      پریویو / ٹیسٹنگ کے لیے اوپر لکھی گئی ای میل کو لوکل `roles` کلیکشن میں `admin: true` دینے کے لیے نیچے بٹن دبائیں:
+                      To activate <code className="font-mono">admin: true</code> for the authorized Super Admin email above:
                     </p>
                     <input
                       type="text"
                       value={bootstrapUid}
                       onChange={(e) => setBootstrapUid(e.target.value)}
-                      placeholder="اختیاری: اپنا Firebase UID لکھیں (خالی چھوڑنے پر خودکار بن جائے گا)"
+                      placeholder="Optional: Enter Firebase UID (auto-generated if left blank)"
                       className="w-full px-3 py-2 bg-stone-900 border border-stone-700 rounded-xl text-xs font-mono text-white"
                     />
                     <button
@@ -1083,7 +1164,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                       onClick={handleBootstrapAdminRoleInConsoleMirror}
                       className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
                     >
-                      ✓ اس ای میل کے لیے `roles` میں `admin: true` ڈاکومنٹ بنائیں
+                      Register Admin Role for Email Address
                     </button>
                   </div>
                 </div>
@@ -1132,19 +1213,19 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                 </span>
               </div>
               <p className="text-xs text-stone-300 font-sans">
-                {activeSession.email || activeSession.username}
+                {activeSession.name || 'Super Admin'}
               </p>
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 font-sans" dir="ltr">
             <button
               type="button"
               onClick={() => openAdminPasswordModal('change')}
               className="min-h-[44px] px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer shadow"
             >
               <KeyRound className="w-4 h-4" />
-              <span>پاس ورڈ تبدیل کریں</span>
+              <span>Reset Password</span>
             </button>
             <button
               type="button"
@@ -1152,7 +1233,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               className="min-h-[44px] px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <ArrowRight className="w-4 h-4" />
-              <span>عوامی پورٹل دیکھیں</span>
+              <span>Back to Portal</span>
             </button>
             <button
               type="button"
@@ -1160,7 +1241,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               className="min-h-[44px] px-3.5 py-2 bg-red-700 hover:bg-red-600 text-white rounded-xl text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
-              <span>لاگ آؤٹ</span>
+              <span>Sign Out</span>
             </button>
           </div>
         </div>
@@ -2725,49 +2806,56 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
           PASSWORD RE-AUTHENTICATION MODAL FOR DANGEROUS ADMIN ACTIONS
          ===================================================================== */}
       {pendingDangerousAction && (
-        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4">
+        <div
+          dir="ltr"
+          lang="en"
+          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-xs flex items-center justify-center p-4 font-sans text-left"
+        >
           <div className="bg-stone-900 border-2 border-amber-400 rounded-3xl max-w-md w-full p-5 space-y-4 shadow-2xl">
             <div className="flex items-center gap-2.5 text-amber-300">
               <KeyRound className="w-6 h-6 shrink-0" />
-              <h3 className="text-lg font-bold">حفاظتی تصدیق: پاس ورڈ دوبارہ درج کریں</h3>
+              <h3 className="text-lg font-bold">Security Verification: Confirm Password</h3>
             </div>
-            <p className="text-xs text-stone-200 leading-loose">
-              آپ ایک اہم ایڈمن کارروائی کرنے لگے ہیں:{' '}
+            <p className="text-xs text-stone-200 leading-relaxed">
+              Please re-enter your Admin <strong>Password</strong> to authorize this action:{' '}
               <strong className="text-amber-300">
-                {pendingDangerousAction.actionUrdu} ({pendingDangerousAction.targetTitle})
+                {pendingDangerousAction.targetTitle}
               </strong>
-              ۔ تصدیق کے لیے اپنا ایڈمن پاس ورڈ دوبارہ ٹائپ کریں۔ یہ عمل <strong>"ایڈمن لاگ"</strong> میں درج کیا جائے گا۔
+              . This operation will be recorded in the Admin Audit Log.
             </p>
 
             {reauthError && (
-              <div className="p-3 bg-red-950 border border-red-500 rounded-xl text-xs text-red-200">
+              <div role="alert" className="p-3 bg-red-950 border border-red-500 rounded-xl text-xs text-red-200">
                 {reauthError}
               </div>
             )}
 
-            <form onSubmit={confirmAndExecuteDangerousAction} className="space-y-3">
-              <input
-                type="password"
-                value={reauthPassword}
-                onChange={(e) => setReauthPassword(e.target.value)}
-                placeholder="اپنا ایڈمن پاس ورڈ دوبارہ لکھیں"
-                className="w-full min-h-[48px] px-4 bg-stone-950 border border-stone-700 rounded-xl text-sm text-white"
-                autoFocus
-                required
-              />
+            <form onSubmit={confirmAndExecuteDangerousAction} className="space-y-3" noValidate>
+              <div>
+                <label className="block text-xs font-bold text-amber-200 mb-1">Password</label>
+                <input
+                  type="password"
+                  value={reauthPassword}
+                  onChange={(e) => setReauthPassword(e.target.value)}
+                  placeholder="Enter your admin password"
+                  className="w-full min-h-[48px] px-4 bg-stone-950 border border-stone-700 rounded-xl text-sm text-white"
+                  autoFocus
+                  required
+                />
+              </div>
               <div className="flex gap-2">
                 <button
                   type="submit"
                   className="flex-1 min-h-[48px] bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-sm font-bold cursor-pointer"
                 >
-                  ✓ تصدیق کریں اور لاگو کریں
+                  Sign In & Confirm
                 </button>
                 <button
                   type="button"
                   onClick={() => setPendingDangerousAction(null)}
                   className="px-4 min-h-[48px] bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-sm font-bold cursor-pointer"
                 >
-                  منسوخ
+                  Cancel
                 </button>
               </div>
             </form>

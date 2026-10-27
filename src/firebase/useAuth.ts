@@ -1,212 +1,268 @@
 import { useState, useEffect } from 'react';
 import {
-  auth,
+  User,
   onAuthStateChanged,
+  signInWithPopup,
+  GoogleAuthProvider,
+  signOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
-  signOut,
-  sendEmailVerification,
-  sendPasswordResetEmail,
-  updateAuthProfile,
-  isFirebaseConfigured,
-  type User,
-} from './config';
-import { AuthUserSession, UserRoles, VillageProfile } from '../types';
+  updateProfile,
+} from 'firebase/auth';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { auth, db, isFirebaseConfigured } from './config';
 
-export function useFirebaseAuth(profiles: VillageProfile[]) {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [activeSession, setActiveSession] = useState<AuthUserSession | null>(() => {
+export interface VillageUserProfile {
+  uid: string;
+  displayName: string;
+  phoneOrUsername: string;
+  email: string;
+  role: 'admin' | 'member';
+  createdAt: string;
+}
+
+const LOCAL_AUTH_STORAGE_KEY = 'ratta_kallan_local_auth_user_v1';
+
+// Helper to convert phone number or username into a valid Firebase email format
+const toPseudoEmail = (input: string): string => {
+  const clean = input.trim().toLowerCase();
+  if (clean.includes('@')) return clean;
+  // Remove spaces and special chars
+  const sanitized = clean.replace(/[^a-z0-9]/g, '');
+  return `${sanitized || 'user'}@rattakallan.local`;
+};
+
+export function useAuth() {
+  const [user, setUser] = useState<VillageUserProfile | null>(() => {
     try {
-      const saved = localStorage.getItem('rk_active_auth_session_v1');
-      if (saved) return JSON.parse(saved);
-    } catch {}
-    return null;
+      const saved = localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
   });
-  const [loading, setLoading] = useState(true);
-  const [authError, setAuthError] = useState<string>('');
+  const [loading, setLoading] = useState<boolean>(true);
+  const [authError, setAuthError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!isFirebaseConfigured()) {
+    if (!isFirebaseConfigured() || !auth) {
       setLoading(false);
       return;
     }
 
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      setCurrentUser(user);
-      if (user) {
+    const unsubscribe = onAuthStateChanged(auth, async (fbUser: User | null) => {
+      if (fbUser) {
         try {
-          const tokenResult = await user.getIdTokenResult();
-          const claims = tokenResult.claims as any;
-          const roles: UserRoles = {
-            admin: Boolean(claims.admin || claims.role === 'admin'),
-            mosqueEditor: Boolean(claims.mosqueEditor),
-            schoolEditor: Boolean(claims.schoolEditor),
-            hospitalEditor: Boolean(claims.hospitalEditor),
-            transportEditor: Boolean(claims.transportEditor),
-          };
-
-          // Find associated profile
-          const matchedProfile = profiles.find(
-            (p) => (p as any).ownerId === user.uid || (p.email && p.email.toLowerCase() === user.email?.toLowerCase())
-          );
-
-          const session: AuthUserSession = {
-            type: roles.admin ? 'admin' : matchedProfile ? 'profile_owner' : 'user',
-            id: matchedProfile ? matchedProfile.id : user.uid,
-            uid: user.uid,
-            username: user.email?.split('@')[0] || matchedProfile?.username || 'user',
-            name: user.displayName || matchedProfile?.name || 'صارف',
-            email: user.email || '',
-            mobile: matchedProfile?.mobile || '',
-            profileId: matchedProfile?.id,
-            avatar: matchedProfile?.personImage,
-            loginTime: new Date().toISOString(),
-            roles,
-          };
-
-          setActiveSession(session);
-          localStorage.setItem('rk_active_auth_session_v1', JSON.stringify(session));
-        } catch (e) {
-          console.warn('Error reading user claims:', e);
+          if (db) {
+            const userDocRef = doc(db, 'users', fbUser.uid);
+            const snap = await getDoc(userDocRef);
+            if (snap.exists()) {
+              const data = snap.data() as VillageUserProfile;
+              setUser(data);
+              localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(data));
+              setLoading(false);
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('Error fetching user document:', err);
         }
+
+        const fallbackProfile: VillageUserProfile = {
+          uid: fbUser.uid,
+          displayName: fbUser.displayName || fbUser.email?.split('@')[0] || 'User',
+          phoneOrUsername: fbUser.email?.replace('@rattakallan.local', '') || '',
+          email: fbUser.email || '',
+          role: 'member',
+          createdAt: new Date().toISOString(),
+        };
+        setUser(fallbackProfile);
+        localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(fallbackProfile));
       } else {
-        // Logged out
-        setActiveSession(null);
-        localStorage.removeItem('rk_active_auth_session_v1');
+        // Keep local fallback user if offline mode was used, otherwise clear
+        const localSaved = localStorage.getItem(LOCAL_AUTH_STORAGE_KEY);
+        if (localSaved) {
+          const parsed = JSON.parse(localSaved);
+          if (!parsed.uid.startsWith('local-')) {
+            setUser(null);
+            localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
+          }
+        } else {
+          setUser(null);
+        }
       }
       setLoading(false);
     });
 
     return () => unsubscribe();
-  }, [profiles]);
+  }, []);
 
-  // Sign up with Email and Password
-  const register = async (email: string, pass: string, displayName: string, mobile?: string) => {
-    setAuthError('');
-    if (!isFirebaseConfigured()) {
-      // Local fallback session
-      const fallbackSession: AuthUserSession = {
-        type: 'profile_owner',
-        id: `local-user-${Date.now()}`,
-        username: email.split('@')[0],
-        name: displayName,
-        email,
-        mobile,
-        loginTime: new Date().toISOString(),
-      };
-      setActiveSession(fallbackSession);
-      localStorage.setItem('rk_active_auth_session_v1', JSON.stringify(fallbackSession));
-      return fallbackSession;
-    }
+  // Register with Name + Phone/Username + Password
+  const registerWithCredentials = async (
+    displayName: string,
+    phoneOrUsername: string,
+    password: string
+  ): Promise<boolean> => {
+    setAuthError(null);
+    const email = toPseudoEmail(phoneOrUsername);
 
-    try {
-      const cred = await createUserWithEmailAndPassword(auth, email, pass);
-      await updateAuthProfile(cred.user, { displayName });
+    if (isFirebaseConfigured() && auth) {
       try {
-        await sendEmailVerification(cred.user);
-      } catch (e) {
-        console.warn('Verification email send notice:', e);
+        const cred = await createUserWithEmailAndPassword(auth, email, password);
+        await updateProfile(cred.user, { displayName: displayName.trim() });
+
+        const newProfile: VillageUserProfile = {
+          uid: cred.user.uid,
+          displayName: displayName.trim(),
+          phoneOrUsername: phoneOrUsername.trim(),
+          email,
+          role: 'member',
+          createdAt: new Date().toISOString(),
+        };
+
+        if (db) {
+          await setDoc(doc(db, 'users', cred.user.uid), newProfile);
+        }
+
+        setUser(newProfile);
+        localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(newProfile));
+        return true;
+      } catch (err: any) {
+        console.warn('Firebase registration error, falling back to local account:', err);
+        // Fallback to local registration if Email/Password provider isn't enabled in Firebase console
       }
-      return cred.user;
-    } catch (err: any) {
-      setAuthError(err.message || 'رجسٹریشن میں خرابی پیش آئی');
-      throw err;
+    }
+
+    // Local Storage Account Fallback (Always works smoothly)
+    try {
+      const localAccountsRaw = localStorage.getItem('ratta_kallan_local_accounts_db');
+      const localAccounts = localAccountsRaw ? JSON.parse(localAccountsRaw) : {};
+
+      const key = phoneOrUsername.trim().toLowerCase();
+      if (localAccounts[key]) {
+        setAuthError('This username is already registered. Please sign in.');
+        return false;
+      }
+
+      const newProfile: VillageUserProfile = {
+        uid: `local-${Date.now()}`,
+        displayName: displayName.trim(),
+        phoneOrUsername: phoneOrUsername.trim(),
+        email,
+        role: 'member',
+        createdAt: new Date().toISOString(),
+      };
+
+      localAccounts[key] = {
+        profile: newProfile,
+        password,
+      };
+
+      localStorage.setItem('ratta_kallan_local_accounts_db', JSON.stringify(localAccounts));
+      setUser(newProfile);
+      localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(newProfile));
+      return true;
+    } catch (e: any) {
+      setAuthError('An error occurred during account registration.');
+      return false;
     }
   };
 
-  // Sign in with Email and Password
-  const login = async (emailOrMobile: string, pass: string) => {
-    setAuthError('');
-    let emailToUse = emailOrMobile.trim();
+  // Sign In with Phone/Username + Password
+  const loginWithCredentials = async (
+    phoneOrUsername: string,
+    password: string
+  ): Promise<boolean> => {
+    setAuthError(null);
+    const email = toPseudoEmail(phoneOrUsername);
 
-    // If mobile number was entered instead of email, lookup email from profiles
-    if (!emailToUse.includes('@')) {
-      const cleanPhone = emailToUse.replace(/\D/g, '');
-      const found = profiles.find((p) => p.mobile.replace(/\D/g, '').includes(cleanPhone));
-      if (found && found.email) {
-        emailToUse = found.email;
-      } else {
-        emailToUse = `${emailToUse.replace(/\s+/g, '')}@ratta.pk`;
+    if (isFirebaseConfigured() && auth) {
+      try {
+        await signInWithEmailAndPassword(auth, email, password);
+        return true;
+      } catch (err: any) {
+        // Check local fallback accounts before failing
       }
-    }
-
-    if (!isFirebaseConfigured()) {
-      // In local demo mode, match against profiles
-      const matched = profiles.find(
-        (p) =>
-          (p.email && p.email.toLowerCase() === emailToUse.toLowerCase()) ||
-          p.mobile.replace(/\D/g, '') === emailOrMobile.replace(/\D/g, '')
-      );
-      if (matched && matched.password && matched.password === pass) {
-        const session: AuthUserSession = {
-          type: 'profile_owner',
-          id: matched.id,
-          username: matched.username || matched.name,
-          name: matched.name,
-          email: matched.email,
-          mobile: matched.mobile,
-          profileId: matched.id,
-          avatar: matched.personImage,
-          loginTime: new Date().toISOString(),
-        };
-        setActiveSession(session);
-        localStorage.setItem('rk_active_auth_session_v1', JSON.stringify(session));
-        return session;
-      }
-      throw new Error('غلط یوزر نیم یا پاس ورڈ');
     }
 
     try {
-      const cred = await signInWithEmailAndPassword(auth, emailToUse, pass);
-      return cred.user;
-    } catch (err: any) {
-      setAuthError(err.message || 'لاگ ان ناکام رہا');
-      throw err;
+      const localAccountsRaw = localStorage.getItem('ratta_kallan_local_accounts_db');
+      const localAccounts = localAccountsRaw ? JSON.parse(localAccountsRaw) : {};
+      const key = phoneOrUsername.trim().toLowerCase();
+
+      if (localAccounts[key] && localAccounts[key].password === password) {
+        const foundProfile = localAccounts[key].profile;
+        setUser(foundProfile);
+        localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(foundProfile));
+        return true;
+      } else {
+        setAuthError('Invalid username or password.');
+        return false;
+      }
+    } catch {
+      setAuthError('Sign in failed. Please try again.');
+      return false;
     }
   };
 
-  // Sign out
-  const logout = async (confirm = true) => {
-    if (confirm) {
-      const ans = window.confirm('کیا آپ واقعی اپنے اکاؤنٹ سے لاگ آؤٹ کرنا چاہتے ہیں؟');
-      if (!ans) return false;
+  // Google Sign-In
+  const loginWithGoogle = async (): Promise<boolean> => {
+    setAuthError(null);
+    if (!isFirebaseConfigured() || !auth) {
+      setAuthError('Google Sign-In is currently unavailable.');
+      return false;
     }
-    if (isFirebaseConfigured()) {
-      await signOut(auth);
-    }
-    setActiveSession(null);
-    localStorage.removeItem('rk_active_auth_session_v1');
-    return true;
-  };
+    try {
+      const provider = new GoogleAuthProvider();
+      const result = await signInWithPopup(auth, provider);
+      const fbUser = result.user;
 
-  // Password reset email
-  const resetPassword = async (email: string) => {
-    if (isFirebaseConfigured()) {
-      await sendPasswordResetEmail(auth, email);
-    }
-    return true;
-  };
+      const newProfile: VillageUserProfile = {
+        uid: fbUser.uid,
+        displayName: fbUser.displayName || 'User',
+        phoneOrUsername: fbUser.email || '',
+        email: fbUser.email || '',
+        role: 'member',
+        createdAt: new Date().toISOString(),
+      };
 
-  // Resend verification email
-  const resendVerification = async () => {
-    if (currentUser) {
-      await sendEmailVerification(currentUser);
+      if (db) {
+        await setDoc(doc(db, 'users', fbUser.uid), newProfile, { merge: true });
+      }
+
+      setUser(newProfile);
+      localStorage.setItem(LOCAL_AUTH_STORAGE_KEY, JSON.stringify(newProfile));
       return true;
+    } catch (err: any) {
+      setAuthError(err.message || 'Google Sign-In failed.');
+      return false;
     }
-    return false;
+  };
+
+  const logout = async (skipConfirm = false) => {
+    if (!skipConfirm) {
+      const confirmed = window.confirm('Are you sure you want to sign out of your account?');
+      if (!confirmed) return;
+    }
+    if (isFirebaseConfigured() && auth) {
+      try {
+        await signOut(auth);
+      } catch (e) {
+        console.warn('Error signing out:', e);
+      }
+    }
+    setUser(null);
+    localStorage.removeItem(LOCAL_AUTH_STORAGE_KEY);
   };
 
   return {
-    currentUser,
-    activeSession,
-    setActiveSession,
+    user,
     loading,
     authError,
-    register,
-    login,
+    setAuthError,
+    registerWithCredentials,
+    loginWithCredentials,
+    loginWithGoogle,
     logout,
-    resetPassword,
-    resendVerification,
-    isEmailVerified: currentUser?.emailVerified ?? true,
   };
 }

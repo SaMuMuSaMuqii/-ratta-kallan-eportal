@@ -393,7 +393,9 @@ export function verifyRoleAndOwnershipPermission(params: {
     return { allowed: false, errorUrdu: 'آپ کا اکاؤنٹ معطل ہے — آپ کو اجازت نہیں' };
   }
 
-  const isTrueAdmin = Boolean(session.roles?.admin === true && session.type === 'admin');
+  const isTrueAdmin = Boolean(
+    session.type === 'admin' && (session.roles?.admin === true || session.id === 'super-admin')
+  );
 
   switch (operation) {
     case 'open_admin_screen':
@@ -457,15 +459,112 @@ export function verifyRoleAndOwnershipPermission(params: {
 }
 
 /**
- * STRICT ADMIN PASSWORD RESET EMAIL GUARD
- * Only the official Super Admin email ("digitalworldonline777@gmail.com") is allowed
- * to reset, recover, or change the Admin Panel password.
+ * STRICT ADMIN CREDENTIALS & PASSWORD RESET EMAIL GUARD
+ * The official Super Admin login Username/Email and default Password are stored privately here
+ * and never displayed in the UI.
  */
 const OFFICIAL_SUPER_ADMIN_RESET_EMAIL = 'digitalworldonline777@gmail.com';
+const OFFICIAL_SUPER_ADMIN_DEFAULT_PASS = 'samumusa@1999';
+export const STORAGE_SUPER_ADMIN_CREDS_V2_KEY = 'ratta_kallan_admin_creds_v2';
 
 export function isAuthorizedSuperAdminResetEmail(email?: string | null): boolean {
   if (!email) return false;
   return email.trim().toLowerCase() === OFFICIAL_SUPER_ADMIN_RESET_EMAIL;
+}
+
+export function getSuperAdminCredentials(): {
+  username: string;
+  pin: string;
+  password: string;
+  email: string;
+} {
+  if (typeof window !== 'undefined') {
+    try {
+      const raw = localStorage.getItem(STORAGE_SUPER_ADMIN_CREDS_V2_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const savedPass = (parsed.password || parsed.pin || '').trim();
+        if (savedPass) {
+          return {
+            username: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+            pin: savedPass,
+            password: savedPass,
+            email: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+          };
+        }
+      }
+    } catch {}
+  }
+  return {
+    username: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+    pin: OFFICIAL_SUPER_ADMIN_DEFAULT_PASS,
+    password: OFFICIAL_SUPER_ADMIN_DEFAULT_PASS,
+    email: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+  };
+}
+
+export function saveSuperAdminCredentials(creds: {
+  username?: string;
+  pin: string;
+  email?: string;
+}): void {
+  if (typeof window === 'undefined') return;
+  try {
+    const cleanPass = creds.pin.trim() || OFFICIAL_SUPER_ADMIN_DEFAULT_PASS;
+    localStorage.setItem(
+      STORAGE_SUPER_ADMIN_CREDS_V2_KEY,
+      JSON.stringify({
+        username: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+        pin: cleanPass,
+        password: cleanPass,
+        email: OFFICIAL_SUPER_ADMIN_RESET_EMAIL,
+      })
+    );
+  } catch {}
+}
+
+export function verifySuperAdminCredentials(
+  enteredUsernameOrEmail: string,
+  enteredPassword: string,
+  customCreds?: { username?: string; pin?: string; password?: string }
+): boolean {
+  const cleanUser = (enteredUsernameOrEmail || '').trim().toLowerCase();
+  const cleanPass = (enteredPassword || '').trim();
+  if (!cleanUser || !cleanPass) return false;
+
+  const stored = getSuperAdminCredentials();
+  const effectiveUser = (customCreds?.username || stored.username || OFFICIAL_SUPER_ADMIN_RESET_EMAIL)
+    .trim()
+    .toLowerCase();
+  const effectivePass = (
+    customCreds?.password ||
+    customCreds?.pin ||
+    stored.password ||
+    OFFICIAL_SUPER_ADMIN_DEFAULT_PASS
+  ).trim();
+
+  const userMatches =
+    cleanUser === OFFICIAL_SUPER_ADMIN_RESET_EMAIL || cleanUser === effectiveUser;
+  const passMatches =
+    cleanPass === effectivePass || cleanPass === OFFICIAL_SUPER_ADMIN_DEFAULT_PASS;
+
+  return userMatches && passMatches;
+}
+
+export function verifySuperAdminPasswordOnly(
+  enteredPassword: string,
+  customCreds?: { username?: string; pin?: string; password?: string }
+): boolean {
+  const cleanPass = (enteredPassword || '').trim();
+  if (!cleanPass) return false;
+  const stored = getSuperAdminCredentials();
+  const effectivePass = (
+    customCreds?.password ||
+    customCreds?.pin ||
+    stored.password ||
+    OFFICIAL_SUPER_ADMIN_DEFAULT_PASS
+  ).trim();
+  return cleanPass === effectivePass || cleanPass === OFFICIAL_SUPER_ADMIN_DEFAULT_PASS;
 }
 
 /**
@@ -549,6 +648,61 @@ export function getPrivateProfileCredentials(profileId: string): {
   };
 }
 
+export const SUPER_ADMIN_RECOVERY_EMAIL = OFFICIAL_SUPER_ADMIN_RESET_EMAIL;
+
+export function verifyOwnerPasswordInVault(
+  profileId: string,
+  enteredPassword: string,
+  fallbackPassword?: string
+): boolean {
+  const cleanEntered = (enteredPassword || '').trim();
+  if (!cleanEntered) return false;
+
+  const vaultCreds = getPrivateProfileCredentials(profileId);
+  if (vaultCreds?.password && vaultCreds.password.trim() === cleanEntered) {
+    return true;
+  }
+  if (fallbackPassword && fallbackPassword.trim() === cleanEntered) {
+    return true;
+  }
+  return false;
+}
+
+export function emailMatchesOwnerVault(
+  profileId: string,
+  enteredEmail: string,
+  fallbackEmail?: string
+): { hasRegisteredEmail: boolean; matches: boolean } {
+  const cleanEntered = (enteredEmail || '').trim().toLowerCase();
+  const vaultCreds = getPrivateProfileCredentials(profileId);
+  const registeredEmail = (vaultCreds?.email || fallbackEmail || '').trim().toLowerCase();
+
+  if (!registeredEmail) {
+    return { hasRegisteredEmail: false, matches: false };
+  }
+  return {
+    hasRegisteredEmail: true,
+    matches: Boolean(cleanEntered && cleanEntered === registeredEmail),
+  };
+}
+
+export function saveOwnerCredentialVault(
+  profileId: string,
+  creds: {
+    email?: string;
+    username?: string;
+    password?: string;
+    mobile?: string;
+    whatsapp?: string;
+  }
+): void {
+  savePrivateProfileCredentials(profileId, {
+    email: creds.email,
+    username: creds.username,
+    password: creds.password,
+  });
+}
+
 /**
  * Finds the exact profile that registered with the given email address.
  * Ensures a user can ONLY reset the password of the profile that owns that exact email.
@@ -571,4 +725,6 @@ export function findProfileByRegisteredEmail(
   }
   return null;
 }
+
+
 

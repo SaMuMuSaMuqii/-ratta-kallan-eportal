@@ -227,13 +227,13 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
       (p) => (p.username || '').toLowerCase() === cleanUser
     );
     if (isTaken) {
-      setErrorMsg('یہ یوزر نیم پہلے سے کسی نے رکھا ہوا ہے! براہ کرم کوئی دوسرا یوزر نیم درج کریں۔');
+      setErrorMsg('This Username is already taken. Please choose a different Username.');
       return;
     }
 
     const cleanPass = profPassword.trim();
     if (cleanPass.length < 4) {
-      setErrorMsg('پروفائل کی حفاظت کے لیے کم از کم 4 ہندسوں یا حروف کا خفیہ پاس ورڈ لازمی رکھیں۔');
+      setErrorMsg('Please set a Password of at least 4 characters to protect your account.');
       return;
     }
 
@@ -716,47 +716,53 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                 </div>
 
                 {/* Personal Security & Ownership Credentials */}
-                <div className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-3.5 rounded-2xl border-2 border-emerald-500/60 space-y-2.5 font-nastaliq text-xs">
+                <div
+                  dir="ltr"
+                  lang="en"
+                  className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-3.5 rounded-2xl border-2 border-emerald-500/60 space-y-2.5 font-sans text-xs text-left"
+                >
                   <div className="flex items-center gap-1.5 text-emerald-950 font-bold text-xs">
                     <KeyRound className="w-4 h-4 text-emerald-700 shrink-0" />
-                    <span>🔒 ذاتی یوزر نیم و پاس ورڈ (Security Credentials):</span>
+                    <span>Account Sign In & Password Recovery Credentials</span>
                   </div>
                   <p className="text-[11px] text-stone-600 leading-relaxed">
-                    یہ معلومات خفیہ رہیں گی اور کسی کے کارڈ پر ظاہر نہیں ہوں گی۔ صرف آپ اس سے بعد میں معلومات تبدیل یا ڈیلیٹ کر سکیں گے۔
+                    Your <strong>Username</strong> and <strong>Password</strong> remain private and allow you to sign in later to edit or delete your profile.
                   </p>
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
-                    <div className="text-right">
+                    <div>
                       <label className="block text-[11px] font-bold text-stone-800 mb-1">
-                        ذاتی یوزر نیم (Username) *
+                        Username *
                       </label>
                       <input
                         type="text"
                         value={profUsername}
                         onChange={(e) => setProfUsername(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
-                        placeholder="مثال: arshad_tractor"
+                        placeholder="e.g., arshad_tractor"
                         className="w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 bg-white"
                         required
                       />
                     </div>
 
-                    <div className="text-right">
+                    <div>
                       <label className="block text-[11px] font-bold text-stone-800 mb-1">
-                        خفیہ پاس ورڈ (Password) *
+                        Password *
                       </label>
                       <div className="relative">
                         <input
                           type={showProfPassword ? 'text' : 'password'}
                           value={profPassword}
                           onChange={(e) => setProfPassword(e.target.value)}
-                          placeholder="کم از کم 4 حروف یا ہندسے"
-                          className="w-full px-3 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 bg-white"
+                          placeholder="Minimum 4 characters"
+                          className="w-full px-3 pr-9 py-2 border rounded-xl font-mono text-xs focus:ring-2 focus:ring-emerald-500 bg-white"
                           required
                         />
                         <button
                           type="button"
                           onClick={() => setShowProfPassword((prev) => !prev)}
-                          className="absolute left-2.5 top-2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                          className="absolute right-2.5 top-2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                          title={showProfPassword ? 'Hide password' : 'Show password'}
+                          aria-label={showProfPassword ? 'Hide password' : 'Show password'}
                         >
                           {showProfPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                         </button>
@@ -764,22 +770,22 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                     </div>
                   </div>
 
-                  <div className="text-right pt-0.5">
+                  <div className="pt-0.5">
                     <label className="block text-[11px] font-bold text-stone-800 mb-1">
-                      ریکوری ای میل ایڈریس (Password Recovery Email):
+                      Email Address
                     </label>
                     <div className="relative">
                       <input
                         type="email"
                         value={profEmail}
                         onChange={(e) => setProfEmail(e.target.value)}
-                        placeholder="مثال: yourname@gmail.com"
+                        placeholder="e.g., yourname@gmail.com"
                         className="w-full px-3 py-2 border rounded-xl font-sans text-xs focus:ring-2 focus:ring-emerald-500 bg-white pl-8"
                       />
                       <Mail className="w-3.5 h-3.5 text-stone-400 absolute left-2.5 top-2.5 pointer-events-none" />
                     </div>
                     <span className="text-[10px] text-emerald-800 font-sans block mt-0.5">
-                      اگر آپ پاس ورڈ بھول جائیں تو اس ای میل سے فوری ری سیٹ کر سکیں گے۔
+                      Used for "Forgot Password?" recovery to receive a password reset link.
                     </span>
                   </div>
                 </div>

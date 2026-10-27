@@ -241,13 +241,13 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
       (p) => p.id !== editingProfile?.id && (p.username || '').toLowerCase() === cleanUser
     );
     if (isTaken) {
-      setErrorMsg('یہ یوزر نیم پہلے سے کسی نے رکھا ہوا ہے! براہ کرم دوسرا یوزر نیم منتخب کریں۔');
+      setErrorMsg('This Username is already taken. Please choose a different Username.');
       return;
     }
 
     const cleanPass = password.trim();
     if (cleanPass.length < 4) {
-      setErrorMsg('پروفائل کی حفاظت کے لیے کم از کم 4 ہندسوں یا حروف کا خفیہ پاس ورڈ لازمی رکھیں۔');
+      setErrorMsg('Please set a Password of at least 4 characters to protect your account.');
       return;
     }
 
@@ -811,73 +811,79 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
               />
             </div>
 
-            {/* Individual Security Credentials (Username, Password, Recovery Email) */}
-            <div className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-4 rounded-2xl border-2 border-emerald-500/60 space-y-3 font-nastaliq">
+            {/* Individual Security Credentials (Username, Password, Email Address) */}
+            <div
+              dir="ltr"
+              lang="en"
+              className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-4 rounded-2xl border-2 border-emerald-500/60 space-y-3 font-sans text-left"
+            >
               <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm">
                 <KeyRound className="w-4 h-4 text-emerald-700 shrink-0" />
-                <span>🔒 ذاتی اکاؤنٹ، یوزر نیم اور پاس ورڈ پروٹیکشن:</span>
+                <span>Account Sign In & Password Recovery Credentials</span>
               </div>
               <p className="text-[11px] text-stone-600 leading-relaxed">
-                یہ کوائف کارڈ پر کسی کو نظر نہیں آئیں گے۔ بعد میں صرف آپ اس یوزر نیم اور پاس ورڈ سے اپنی معلومات تبدیل یا حذف کر سکیں گے۔ اگر پاس ورڈ بھول جائیں تو ای میل سے ری سیٹ کر سکیں گے۔
+                Your <strong>Username</strong> and <strong>Password</strong> remain private and allow you to sign in later to edit or delete your profile. Your <strong>Email Address</strong> is used to send a password reset link if you forget your password.
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
-                <div className="text-right">
+                <div>
                   <label className="block text-xs font-bold text-stone-800 mb-1">
-                    ذاتی یوزر نیم (Username) *
+                    Username *
                   </label>
                   <input
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, '_'))}
-                    placeholder="مثال: asif_electrician"
+                    placeholder="e.g., asif_electrician"
                     className="w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900 focus:ring-2 focus:ring-emerald-500 font-mono text-xs bg-white"
                     required
                   />
-                  <span className="text-[10px] text-stone-500 font-sans">انگلش کے چھوٹے حروف اور انڈرسکور (_)</span>
+                  <span className="text-[10px] text-stone-500 font-sans">Lowercase letters, numbers, and underscores (_)</span>
                 </div>
 
-                <div className="text-right">
+                <div>
                   <label className="block text-xs font-bold text-stone-800 mb-1">
-                    خفیہ پاس ورڈ (Password) *
+                    Password *
                   </label>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      placeholder="کم از کم 4 حروف یا ہندسے"
-                      className="w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900 focus:ring-2 focus:ring-emerald-500 font-mono text-xs bg-white"
+                      placeholder="Minimum 4 characters"
+                      className="w-full rounded-xl border border-stone-300 px-3 pr-9 py-2 text-stone-900 focus:ring-2 focus:ring-emerald-500 font-mono text-xs bg-white"
                       required
                     />
                     <button
                       type="button"
                       onClick={() => setShowPassword((prev) => !prev)}
-                      className="absolute left-2.5 top-2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                      className="absolute right-2.5 top-2 text-stone-400 hover:text-stone-600 cursor-pointer"
+                      title={showPassword ? 'Hide password' : 'Show password'}
+                      aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
                       {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                     </button>
                   </div>
-                  <span className="text-[10px] text-stone-500 font-sans">یہ پاس ورڈ صرف آپ کے پاس رہے گا</span>
+                  <span className="text-[10px] text-stone-500 font-sans">Keep this password private for account sign-in</span>
                 </div>
               </div>
 
-              <div className="text-right pt-1">
+              <div className="pt-1">
                 <label className="block text-xs font-bold text-stone-800 mb-1">
-                  ریکوری ای میل ایڈریس (Password Recovery Email):
+                  Email Address
                 </label>
                 <div className="relative">
                   <input
                     type="email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder="مثال: yourname@gmail.com"
+                    placeholder="e.g., yourname@gmail.com"
                     className="w-full rounded-xl border border-stone-300 px-3 py-2 text-stone-900 focus:ring-2 focus:ring-emerald-500 font-sans text-xs bg-white pl-9"
                   />
                   <Mail className="w-4 h-4 text-stone-400 absolute left-2.5 top-2.5 pointer-events-none" />
                 </div>
                 <span className="text-[10px] text-emerald-800 font-sans">
-                  اگر آپ پاس ورڈ بھول جائیں گے تو اس ای میل پر ری سیٹ کوڈ موصول ہو گا۔
+                  Used for "Forgot Password?" recovery to receive a password reset link.
                 </span>
               </div>
             </div>

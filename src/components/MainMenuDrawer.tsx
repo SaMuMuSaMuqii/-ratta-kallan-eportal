@@ -301,28 +301,30 @@ export const MainMenuDrawer: React.FC<MainMenuDrawerProps> = ({
           </button>
 
           <div className="pt-2 border-t border-stone-800 space-y-1">
-            {/* My Account / Owner Login */}
-            <button
-              onClick={() => handleItemClick('auth')}
-              className="w-full flex items-center justify-between p-3 rounded-2xl bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-200 transition active:scale-98 border border-emerald-700/50"
-            >
-              <div className="flex items-center gap-3">
-                <KeyRound className="w-5 h-5 text-amber-300" />
-                <span>میرا اکاؤنٹ / کاریگر لاگ ان</span>
-              </div>
-              <ChevronLeft className="w-4 h-4 text-emerald-400" />
-            </button>
+            <div className="space-y-1 font-sans" dir="ltr" lang="en">
+              {/* My Account / Owner Sign In */}
+              <button
+                onClick={() => handleItemClick('auth')}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-emerald-950/70 hover:bg-emerald-900/80 text-emerald-200 transition active:scale-98 border border-emerald-700/50 text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <KeyRound className="w-5 h-5 text-amber-300" />
+                  <span className="font-bold text-sm">Sign In / Account</span>
+                </div>
+                <ChevronLeft className="w-4 h-4 text-emerald-400 rotate-180" />
+              </button>
 
-            {/* Forgot Password Reset via Email */}
-            <button
-              onClick={() => handleItemClick('reset_password')}
-              className="w-full flex items-center justify-between p-2.5 rounded-2xl hover:bg-stone-800 text-stone-300 hover:text-amber-200 transition active:scale-98 text-xs"
-            >
-              <div className="flex items-center gap-3">
-                <RefreshCw className="w-4 h-4 text-amber-400" />
-                <span>پاس ورڈ ری سیٹ (بذریعہ ای میل)</span>
-              </div>
-            </button>
+              {/* Forgot Password Reset via Email */}
+              <button
+                onClick={() => handleItemClick('reset_password')}
+                className="w-full flex items-center justify-between p-2.5 rounded-2xl hover:bg-stone-800 text-stone-300 hover:text-amber-200 transition active:scale-98 text-xs text-left"
+              >
+                <div className="flex items-center gap-3">
+                  <RefreshCw className="w-4 h-4 text-amber-400" />
+                  <span className="font-semibold">Forgot Password? (Reset Password)</span>
+                </div>
+              </button>
+            </div>
 
             {/* Terms & Guidelines */}
             <button
