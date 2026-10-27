@@ -42,6 +42,7 @@ import {
   FloodAlertStatus,
   PortalRoleKey,
   EventCategory,
+  BannerBenefitsStripConfig,
 } from '../types';
 import { PublicHelpPostItem } from '../utils/voiceAskEngine';
 import {
@@ -55,8 +56,15 @@ import {
   saveBannerSlideImageDoc,
   deleteBannerSlideImageDoc,
   fetchUserRolesDoc,
+  loadBannerBenefitsStripConfig,
+  loadBannerBenefitsStripConfigSync,
+  saveBannerBenefitsStripConfig,
+  DEFAULT_BANNER_BENEFIT_PAIRS,
 } from '../firebase/firestoreService';
-import { verifyRoleAndOwnershipPermission } from '../utils/privacySanitizer';
+import {
+  verifyRoleAndOwnershipPermission,
+  isAuthorizedSuperAdminResetEmail,
+} from '../utils/privacySanitizer';
 import {
   auth,
   signInWithEmailAndPassword,
@@ -255,6 +263,19 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
   const [newSlideDate, setNewSlideDate] = useState('آج');
   const [newSlideLocation, setNewSlideLocation] = useState('رتہ کلاں، جھنگ');
   const [bannerNotice, setBannerNotice] = useState('');
+  const [bannerStripConfig, setBannerStripConfig] = useState<BannerBenefitsStripConfig>(() =>
+    loadBannerBenefitsStripConfigSync()
+  );
+
+  useEffect(() => {
+    let mounted = true;
+    loadBannerBenefitsStripConfig().then((cfg) => {
+      if (mounted && cfg) setBannerStripConfig(cfg);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   // Mandi rate form state
   const [newCropUrdu, setNewCropUrdu] = useState('');
@@ -389,6 +410,12 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       setLoginError('پہلے اوپر اپنا ای میل ایڈریس لکھیں۔');
       return;
     }
+    if (!isAuthorizedSuperAdminResetEmail(cleanEmail)) {
+      setLoginError(
+        'صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل ایکٹیویٹ یا پاس ورڈ ری سیٹ کر سکتی ہے۔ باقی صارفین صرف اپنی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔'
+      );
+      return;
+    }
     const newRoleDoc: RoleAssignmentDoc = {
       uid: cleanUid,
       email: cleanEmail,
@@ -433,6 +460,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       setPwdStatusMessage({
         type: 'error',
         text: 'براہ کرم اپنا ایڈمن ای میل ایڈریس درج کریں۔',
+      });
+      return;
+    }
+    if (!isAuthorizedSuperAdminResetEmail(targetEmail)) {
+      setPwdStatusMessage({
+        type: 'error',
+        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) کو ہی ایڈمن پینل کا پاس ورڈ تبدیل یا ری سیٹ کرنے کی اجازت ہے۔ باقی تمام صارفین صرف اپنی ذاتی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔',
       });
       return;
     }
@@ -528,6 +562,13 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       setPwdStatusMessage({
         type: 'error',
         text: 'براہ کرم اپنا درست ایڈمن ای میل ایڈریس لکھیں۔',
+      });
+      return;
+    }
+    if (!isAuthorizedSuperAdminResetEmail(targetEmail)) {
+      setPwdStatusMessage({
+        type: 'error',
+        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل کا پاس ورڈ ری سیٹ کر سکتی ہے۔ باقی صارفین ہوم اسکرین پر "لاگ ان / پاس ورڈ ری سیٹ" میں جا کر اپنی پروفائل کی ای میل پر اپنا پاس ورڈ ری سیٹ کریں۔',
       });
       return;
     }
@@ -1695,6 +1736,146 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                     {bannerNotice}
                   </div>
                 )}
+
+                {/* PART A4: Admin Editor for Banner Uses & Benefits Strip (stored in settings/bannerBenefitsStrip) */}
+                <div className="bg-stone-900 border-2 border-emerald-500/80 rounded-2xl p-4 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800 pb-2.5">
+                    <div>
+                      <h4 className="text-sm sm:text-base font-bold text-emerald-300">
+                        🌿 ہر بینر سلائیڈ پر "استعمال:" اور "فائدہ:" پٹی (settings/bannerBenefitsStrip)
+                      </h4>
+                      <p className="text-[11px] text-stone-400">
+                        یہ دو سطریں ہر بینر سلائیڈ کے نیچے گہرے سبز باکس میں باری باری نظر آتی ہیں (تصویر کے اندر نہیں تاکہ 80 KB حد متاثر نہ ہو)۔
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const updated: BannerBenefitsStripConfig = {
+                            ...bannerStripConfig,
+                            hideAll: !bannerStripConfig.hideAll,
+                            updatedAt: new Date().toISOString(),
+                          };
+                          setBannerStripConfig(updated);
+                          await saveBannerBenefitsStripConfig(updated);
+                          onBannerImagesChanged();
+                          setBannerNotice(
+                            updated.hideAll
+                              ? 'بینر فوائد پٹی عارضی طور پر چھپا دی گئی۔'
+                              : 'بینر فوائد پٹی دوبارہ فعال کر دی گئی۔'
+                          );
+                        }}
+                        className={`min-h-[40px] px-3 rounded-xl text-xs font-bold cursor-pointer ${
+                          bannerStripConfig.hideAll
+                            ? 'bg-emerald-600 text-white'
+                            : 'bg-stone-800 text-amber-300 border border-amber-400/40'
+                        }`}
+                      >
+                        {bannerStripConfig.hideAll ? 'پٹی دوبارہ دکھائیں' : 'پوری پٹی چھپائیں'}
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const resetCfg: BannerBenefitsStripConfig = {
+                            hideAll: false,
+                            pairs: DEFAULT_BANNER_BENEFIT_PAIRS.map((p) => ({ ...p })),
+                            updatedAt: new Date().toISOString(),
+                          };
+                          setBannerStripConfig(resetCfg);
+                          await saveBannerBenefitsStripConfig(resetCfg);
+                          onBannerImagesChanged();
+                          setBannerNotice('ڈیفالٹ استعمال اور فوائد بحال کر دیے گئے۔');
+                        }}
+                        className="min-h-[40px] px-3 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-bold cursor-pointer"
+                      >
+                        ڈیفالٹ بحال کریں
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="space-y-2.5">
+                    {bannerStripConfig.pairs.map((pair, idx) => (
+                      <div
+                        key={pair.id || idx}
+                        className="p-3 bg-stone-950 border border-stone-800 rounded-xl space-y-2"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-xs font-bold text-amber-300">
+                            جوڑا نمبر {idx + 1} (سلائیڈ {idx + 1})
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const nextPairs = bannerStripConfig.pairs.map((p, i) =>
+                                i === idx ? { ...p, isHidden: !p.isHidden } : p
+                              );
+                              setBannerStripConfig({
+                                ...bannerStripConfig,
+                                pairs: nextPairs,
+                              });
+                            }}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold cursor-pointer ${
+                              pair.isHidden
+                                ? 'bg-red-900/60 text-red-200 border border-red-500/40'
+                                : 'bg-emerald-900/50 text-emerald-200 border border-emerald-500/40'
+                            }`}
+                          >
+                            {pair.isHidden ? 'چھپا ہوا (دکھائیں)' : 'ظاہر ہے (چھپائیں)'}
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            type="text"
+                            value={pair.useUrdu}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const nextPairs = bannerStripConfig.pairs.map((p, i) =>
+                                i === idx ? { ...p, useUrdu: val } : p
+                              );
+                              setBannerStripConfig({
+                                ...bannerStripConfig,
+                                pairs: nextPairs,
+                              });
+                            }}
+                            placeholder="استعمال: ..."
+                            className="min-h-[40px] px-3 bg-stone-900 border border-stone-700 rounded-xl text-xs text-amber-200"
+                          />
+                          <input
+                            type="text"
+                            value={pair.benefitUrdu}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              const nextPairs = bannerStripConfig.pairs.map((p, i) =>
+                                i === idx ? { ...p, benefitUrdu: val } : p
+                              );
+                              setBannerStripConfig({
+                                ...bannerStripConfig,
+                                pairs: nextPairs,
+                              });
+                            }}
+                            placeholder="فائدہ: ..."
+                            className="min-h-[40px] px-3 bg-stone-900 border border-stone-700 rounded-xl text-xs text-emerald-200"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await saveBannerBenefitsStripConfig(bannerStripConfig);
+                      onBannerImagesChanged();
+                      setBannerNotice('بینر استعمال اور فوائد کی سطریں محفوظ ہو گئیں۔');
+                    }}
+                    className="min-h-[44px] px-5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold cursor-pointer"
+                  >
+                    ✓ استعمال و فوائد کی پٹی محفوظ کریں
+                  </button>
+                </div>
 
                 {newsEvents.map((ev) => (
                   <div

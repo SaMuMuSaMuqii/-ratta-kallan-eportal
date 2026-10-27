@@ -24,7 +24,13 @@ import {
   sendPasswordResetEmail,
   isFirebaseConfigured,
 } from '../firebase/config';
-import { fetchUserRolesDoc } from '../firebase/firestoreService';
+import { fetchUserRolesDoc, saveRoleAssignmentToFirestore } from '../firebase/firestoreService';
+import {
+  isAuthorizedSuperAdminResetEmail,
+  getPrivateProfileCredentials,
+  savePrivateProfileCredentials,
+  findProfileByRegisteredEmail,
+} from '../utils/privacySanitizer';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -182,10 +188,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       }
     }
 
-    // Search profile matching username, email or mobile
+    // Search profile matching username, email (from private owner vault or profile) or mobile
     const matched = profiles.find((p) => {
-      const u = (p.username || '').toLowerCase();
-      const em = (p.email || '').toLowerCase();
+      const priv = getPrivateProfileCredentials(p.id);
+      const u = (priv?.username || p.username || '').toLowerCase();
+      const em = (priv?.email || p.email || '').toLowerCase();
       const m = p.mobile.replace(/\D/g, '');
       const altM = (p.whatsapp || '').replace(/\D/g, '');
 
@@ -208,8 +215,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       return;
     }
 
-    // Check password
-    const validPass = matched.password || '';
+    // Check password against private owner vault or profile
+    const privCreds = getPrivateProfileCredentials(matched.id);
+    const validPass = privCreds?.password || matched.password || '';
     if (!validPass || enteredPass !== validPass) {
       setLoginError('غلط پاس ورڈ! اگر آپ پاس ورڈ بھول گئے ہیں تو نیچے "پاس ورڈ ری سیٹ" ٹیب پر کلک کریں۔');
       playNotificationChime('alert');
@@ -221,9 +229,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
       type: 'profile_owner',
       id: matched.id,
       uid: matched.ownerUid || matched.id,
-      username: matched.username || matched.name,
+      username: privCreds?.username || matched.username || matched.name,
       name: matched.name,
-      email: matched.email,
+      email: privCreds?.email || matched.email,
       profileId: matched.id,
       mobile: matched.mobile,
       avatar: matched.personImage,
@@ -236,56 +244,108 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     onClose();
   };
 
-  // Request Real Password Reset Link by Email
+  // Request Real Password Reset Link & Update Password strictly by Registered Profile Email (or Official Super Admin Email)
   const handleRequestPasswordReset = async (e: React.FormEvent) => {
     e.preventDefault();
     setResetError('');
 
-    const query = resetInput.trim().toLowerCase();
-    const cleanPhone = resetInput.replace(/\D/g, '');
+    const enteredEmail = resetInput.trim().toLowerCase();
+    const desiredNewPass = newPassword.trim();
 
-    if (!query) {
-      setResetError('براہ کرم اپنا رجسٹرڈ ای میل ایڈریس درج کریں۔');
+    if (!enteredEmail || !enteredEmail.includes('@')) {
+      setResetError('براہ کرم اپنا درست رجسٹرڈ ای میل ایڈریس درج کریں۔');
       return;
     }
 
-    // Determine target email
-    let targetEmail = '';
-    if (query.includes('@')) {
-      targetEmail = query;
-    } else {
-      // Find profile
-      const matched = profiles.find((p) => {
-        const u = (p.username || '').toLowerCase();
-        const em = (p.email || '').toLowerCase();
-        const m = p.mobile.replace(/\D/g, '');
-        return u === query || em === query || (cleanPhone.length >= 7 && m.includes(cleanPhone));
-      });
-      if (matched && matched.email) {
-        targetEmail = matched.email;
-      }
+    if (desiredNewPass && desiredNewPass.length < 6) {
+      setResetError('نیا پاس ورڈ کم از کم 6 حروف یا ہندسوں کا ہونا لازمی ہے۔');
+      return;
     }
 
-    if (!targetEmail) {
-      setResetError('اس اکاؤنٹ سے منسلک کوئی ای میل ایڈریس نہیں ملا۔ براہ کرم اپنا درست ای میل درج کریں۔');
+    // CASE 1: Official Super Admin Email ("digitalworldonline777@gmail.com")
+    if (isAuthorizedSuperAdminResetEmail(enteredEmail)) {
+      if (desiredNewPass) {
+        try {
+          const rawMap = localStorage.getItem('rk_admin_email_pass_verifier_v1');
+          const map = rawMap ? JSON.parse(rawMap) : {};
+          map[enteredEmail] = btoa(unescape(encodeURIComponent(desiredNewPass)));
+          localStorage.setItem('rk_admin_email_pass_verifier_v1', JSON.stringify(map));
+
+          const rawModalMap = localStorage.getItem('rk_admin_email_pass_verifiers_v1');
+          const modalMap = rawModalMap ? JSON.parse(rawModalMap) : {};
+          modalMap[enteredEmail] = btoa(unescape(encodeURIComponent(desiredNewPass)));
+          localStorage.setItem('rk_admin_email_pass_verifiers_v1', JSON.stringify(modalMap));
+        } catch {}
+
+        onUpdateAdminCreds({ username: enteredEmail, pin: desiredNewPass, email: enteredEmail });
+        const uid = `uid-${enteredEmail.replace(/[^a-z0-9]/g, '_')}`;
+        await saveRoleAssignmentToFirestore({
+          uid,
+          email: enteredEmail,
+          name: 'ثمر سعید (سپر ایڈمن)',
+          admin: true,
+          updatedAt: new Date().toISOString(),
+          updatedBy: enteredEmail,
+        });
+      }
+
+      try {
+        if (isFirebaseConfigured()) {
+          await sendPasswordResetEmail(auth, enteredEmail);
+        }
+      } catch {}
+
+      setResetTarget({
+        type: 'admin',
+        email: enteredEmail,
+        name: 'سپر ایڈمن پینل (ثمر سعید)',
+      });
+      setResetSuccess(true);
+      setNewPassword('');
+      playNotificationChime('message');
+      speakText('سپر ایڈمن کا پاس ورڈ کامیابی سے ری سیٹ کر دیا گیا ہے۔', lang);
+      return;
+    }
+
+    // CASE 2: Normal Profile Owner — MUST match the exact email registered on their own profile!
+    const matchedOwner = findProfileByRegisteredEmail(enteredEmail, profiles);
+    if (!matchedOwner) {
+      setResetError(
+        '❌ یہ ای میل کسی پروفائل کے ساتھ رجسٹرڈ نہیں ہے! یاد رکھیں: ایڈمن پینل کا پاس ورڈ صرف آفیشل سپر ایڈمن ای میل (digitalworldonline777@gmail.com) ہی ری سیٹ کر سکتا ہے، اور باقی ہر صارف صرف اپنی پروفائل میں دی گئی ای میل پر ہی اپنا پاس ورڈ ری سیٹ کر سکتا ہے۔'
+      );
       playNotificationChime('alert');
       return;
     }
 
+    // Update ONLY this profile owner's password in the private owner vault
+    if (desiredNewPass) {
+      savePrivateProfileCredentials(matchedOwner.profile.id, {
+        email: enteredEmail,
+        password: desiredNewPass,
+      });
+    }
+
     try {
       if (isFirebaseConfigured()) {
-        await sendPasswordResetEmail(auth, targetEmail);
+        await sendPasswordResetEmail(auth, enteredEmail);
       }
-      setResetSuccess(true);
-      playNotificationChime('message');
-      speakText('پاس ورڈ ری سیٹ کرنے کا محفوظ لنک آپ کی ای میل پر بھیج دیا گیا ہے۔', lang);
     } catch (err: any) {
       console.warn('Firebase password reset notice:', err);
-      // Even if offline/fallback, indicate reset link dispatch
-      setResetSuccess(true);
-      playNotificationChime('message');
-      speakText('پاس ورڈ ری سیٹ کی درخواست موصول ہو گئی ہے۔', lang);
     }
+
+    setResetTarget({
+      type: 'profile',
+      profile: matchedOwner.profile,
+      email: enteredEmail,
+      name: matchedOwner.profile.name,
+    });
+    setResetSuccess(true);
+    setNewPassword('');
+    playNotificationChime('message');
+    speakText(
+      `آپ کی پروفائل ${matchedOwner.profile.name} کا پاس ورڈ ری سیٹ کر دیا گیا ہے۔`,
+      lang
+    );
   };
 
   const maskEmail = (em: string) => {
@@ -474,11 +534,16 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         {/* TAB 2: PASSWORD RESET VIA EMAIL */}
         {tab === 'reset' && (
           <div className="p-4 sm:p-5 space-y-4 font-nastaliq">
-            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 leading-relaxed">
-              <span className="font-bold block text-amber-900 mb-1">
-                📧 ای میل کے ذریعے پاس ورڈ کی محفوظ بازیابی:
+            <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 leading-relaxed space-y-1">
+              <span className="font-bold block text-amber-900">
+                📧 رجسٹرڈ ای میل کے ذریعے پاس ورڈ ری سیٹ:
               </span>
-              اگر آپ اپنا پاس ورڈ بھول گئے ہیں تو اپنی رجسٹرڈ ای میل درج کریں۔ پاس ورڈ تبدیل کرنے کا محفوظ لنک آپ کی ای میل پر بھیج دیا جائے گا۔
+              <p>
+                • ہر صارف صرف <strong>اپنی پروفائل میں دی گئی رجسٹرڈ ای میل</strong> لکھ کر ہی اپنی پروفائل کا پاس ورڈ ری سیٹ کر سکتا ہے۔
+              </p>
+              <p className="text-[11px] text-emerald-900 font-bold">
+                • ایڈمن پینل کا پاس ورڈ صرف آفیشل سپر ایڈمن ای میل سے ہی ری سیٹ ہو سکتا ہے، کسی اور ای میل سے نہیں۔
+              </p>
             </div>
 
             {resetError && (
@@ -491,9 +556,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             {resetSuccess ? (
               <div className="p-4 bg-emerald-100 border-2 border-emerald-500 rounded-2xl text-emerald-900 text-center space-y-3 animate-in zoom-in-95">
                 <CheckCircle2 className="w-10 h-10 text-emerald-700 mx-auto" />
-                <h4 className="font-bold text-sm">پاس ورڈ ری سیٹ کا لنک بھیج دیا گیا ہے</h4>
+                <h4 className="font-bold text-sm">
+                  {resetTarget?.type === 'admin'
+                    ? 'سپر ایڈمن پاس ورڈ ری سیٹ مکمل ہو گیا'
+                    : `پروفائل (${resetTarget?.name || ''}) کا پاس ورڈ ری سیٹ ہو گیا`}
+                </h4>
                 <p className="text-xs leading-relaxed text-stone-700">
-                  ہم نے پاس ورڈ ری سیٹ کا محفوظ لنک آپ کے ای میل ایڈریس پر بھیج دیا ہے۔ برائے مہربانی اپنا ای میل ان باکس (یا اسپیم فولڈر) چیک کریں اور لنک کھول کر نیا پاس ورڈ مقرر کریں۔
+                  آپ کی رجسٹرڈ ای میل ({resetTarget?.email}) کی تصدیق کے بعد پاس ورڈ ری سیٹ لنک بھیج دیا گیا ہے اور آپ کا نیا پاس ورڈ بھی محفوظ کر دیا گیا ہے۔
                 </p>
                 <button
                   type="button"
@@ -507,10 +576,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                 </button>
               </div>
             ) : (
-              <form onSubmit={handleRequestPasswordReset} className="space-y-4">
+              <form onSubmit={handleRequestPasswordReset} className="space-y-3.5">
                 <div className="space-y-1 text-right">
                   <label className="text-xs font-bold text-stone-700 block">
-                    اپنی رجسٹرڈ ای میل درج کریں:
+                    اپنی پروفائل کی رجسٹرڈ ای میل درج کریں:
                   </label>
                   <div className="relative">
                     <input
@@ -519,9 +588,32 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       onChange={(e) => setResetInput(e.target.value)}
                       placeholder="name@example.com"
                       className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-sans focus:outline-none focus:border-amber-600 focus:bg-white text-left"
+                      dir="ltr"
                       required
                     />
-                    <Mail className="w-4 h-4 text-stone-400 absolute left-3 top-3 pointer-events-none" />
+                    <Mail className="w-4 h-4 text-stone-400 absolute right-3 top-3 pointer-events-none" />
+                  </div>
+                </div>
+
+                <div className="space-y-1 text-right">
+                  <label className="text-xs font-bold text-stone-700 block">
+                    نیا پاس ورڈ مقرر کریں (کم از کم 6 حروف — اختیاری):
+                  </label>
+                  <div className="relative">
+                    <input
+                      type={showNewPassword ? 'text' : 'password'}
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      placeholder="نیا پاس ورڈ لکھیں تاکہ فوری تبدیل ہو جائے"
+                      className="w-full p-2.5 bg-stone-50 border border-stone-300 rounded-xl text-xs font-mono focus:outline-none focus:border-amber-600 focus:bg-white"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowNewPassword((prev) => !prev)}
+                      className="absolute left-3 top-2.5 text-stone-400 hover:text-stone-600 cursor-pointer"
+                    >
+                      {showNewPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 
@@ -530,7 +622,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   className="w-full py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold shadow-md transition active:scale-98 flex items-center justify-center gap-1.5 cursor-pointer"
                 >
                   <Send className="w-4 h-4" />
-                  <span>پاس ورڈ ری سیٹ لنک ای میل پر بھیجیں</span>
+                  <span>اپنی رجسٹرڈ ای میل پر پاس ورڈ ری سیٹ کریں</span>
                 </button>
 
                 <div className="text-center pt-2">

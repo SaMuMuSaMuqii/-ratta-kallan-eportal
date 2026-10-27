@@ -44,6 +44,7 @@ interface InboxModalProps {
   ) => void;
   onReply?: (messageId: string, replyText: string) => void;
   onDeleteMessageForUser?: (messageId: string, role: 'sender' | 'receiver') => void;
+  onUndoDeleteMessageForUser?: (messageId: string, role: 'sender' | 'receiver') => void;
   onAdminDeleteMessage?: (messageId: string) => void;
   onReportMessage?: (messageId: string, reason: string) => void;
   isAdmin?: boolean;
@@ -61,6 +62,7 @@ export const InboxModal: React.FC<InboxModalProps> = ({
   onReplyDiscussion,
   onReply,
   onDeleteMessageForUser,
+  onUndoDeleteMessageForUser,
   onAdminDeleteMessage,
   onReportMessage,
   isAdmin = false,
@@ -94,6 +96,17 @@ export const InboxModal: React.FC<InboxModalProps> = ({
   >({});
   const [playingVoiceKey, setPlayingVoiceKey] = useState<string | null>(null);
 
+  // PART C1: Confirmation modal before per-side message delete + 5-second Undo toast
+  const [pendingDeleteTarget, setPendingDeleteTarget] = useState<{
+    messageId: string;
+    role: 'sender' | 'receiver';
+  } | null>(null);
+  const [undoDeleteToast, setUndoDeleteToast] = useState<{
+    messageId: string;
+    role: 'sender' | 'receiver';
+  } | null>(null);
+  const undoTimerRef = useRef<any>(null);
+
   useEffect(() => {
     if (prefilledMobile) {
       setLookupQuery(prefilledMobile);
@@ -113,6 +126,7 @@ export const InboxModal: React.FC<InboxModalProps> = ({
         setRecorder(null);
       }
       setRecordingMessageId(null);
+      setPendingDeleteTarget(null);
     }
   }, [isOpen]);
 
@@ -242,22 +256,43 @@ export const InboxModal: React.FC<InboxModalProps> = ({
     });
   };
 
-  // Soft delete message with Super Admin Vault audit assurance
+  // PART C1: Request per-side delete with Urdu confirmation modal
   const handleDeleteForUser = (msg: VillageMessage) => {
     const isSender =
+      activeTab === 'sent' ||
       (sessionProfileId && msg.senderProfileId === sessionProfileId) ||
       (sessionMobile && cleanDigits(msg.senderMobile) === cleanDigits(sessionMobile));
     const role: 'sender' | 'receiver' = isSender ? 'sender' : 'receiver';
+    setPendingDeleteTarget({ messageId: msg.id, role });
+  };
 
-    const confirmMsg =
-      'کیا آپ واقعی یہ پیغام اپنے ان باکس سے ہٹانا چاہتے ہیں؟\n\n' +
-      'نوٹ: ریکارڈ کے تحفظ کے لیے اس پیغام اور گفتگو کی نقل سپر ایڈمن ثمر سعید کے پاس محفوظ رہے گی۔';
+  const confirmDeleteForUser = () => {
+    if (!pendingDeleteTarget) return;
+    const { messageId, role } = pendingDeleteTarget;
+    setPendingDeleteTarget(null);
 
-    if (window.confirm(confirmMsg)) {
-      if (onDeleteMessageForUser) {
-        onDeleteMessageForUser(msg.id, role);
-      }
+    if (onDeleteMessageForUser) {
+      onDeleteMessageForUser(messageId, role);
     }
+
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+    }
+    setUndoDeleteToast({ messageId, role });
+    undoTimerRef.current = setTimeout(() => {
+      setUndoDeleteToast(null);
+    }, 5000);
+  };
+
+  const handleUndoDelete = () => {
+    if (!undoDeleteToast) return;
+    if (undoTimerRef.current) {
+      clearTimeout(undoTimerRef.current);
+    }
+    if (onUndoDeleteMessageForUser) {
+      onUndoDeleteMessageForUser(undoDeleteToast.messageId, undoDeleteToast.role);
+    }
+    setUndoDeleteToast(null);
   };
 
   return (
@@ -496,13 +531,15 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                         </button>
                       )}
 
-                      {/* Delete from user inbox */}
+                      {/* PART C1: Big thumb-friendly "پیغام حذف کریں" button */}
                       <button
+                        type="button"
                         onClick={() => handleDeleteForUser(msg)}
-                        className="p-1.5 text-stone-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition cursor-pointer"
-                        title="ان باکس سے ڈیلیٹ کریں"
+                        className="min-h-[40px] px-3 py-1.5 bg-red-50 hover:bg-red-600 text-red-700 hover:text-white border border-red-300 rounded-xl text-xs font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs"
+                        title="پیغام حذف کریں"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-4 h-4 shrink-0" />
+                        <span>پیغام حذف کریں</span>
                       </button>
                     </div>
                   </div>
@@ -744,33 +781,97 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                     )}
                   </div>
 
-                  {/* Direct Contact Links */}
-                  <div className="flex items-center gap-2 pt-1 border-t border-stone-100">
-                    <a
-                      href={`tel:${isReceiver ? msg.senderMobile : msg.targetMobile}`}
-                      className="px-3 py-1.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
-                    >
-                      <Phone className="w-3.5 h-3.5 text-amber-300" />
-                      <span>فون ملائیں ({isReceiver ? msg.senderMobile : msg.targetMobile})</span>
-                    </a>
+                  {/* Direct Contact Links & Thumb-Sized Delete Button inside Conversation */}
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-stone-100">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <a
+                        href={`tel:${isReceiver ? msg.senderMobile : msg.targetMobile}`}
+                        className="min-h-[42px] px-3.5 py-2 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                      >
+                        <Phone className="w-3.5 h-3.5 text-amber-300" />
+                        <span>فون ملائیں ({isReceiver ? msg.senderMobile : msg.targetMobile})</span>
+                      </a>
 
-                    <a
-                      href={`https://wa.me/${(isReceiver ? msg.senderMobile : msg.targetMobile)
-                        .replace(/\D/g, '')
-                        .replace(/^0/, '92')}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                      <a
+                        href={`https://wa.me/${(isReceiver ? msg.senderMobile : msg.targetMobile)
+                          .replace(/\D/g, '')
+                          .replace(/^0/, '92')}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="min-h-[42px] px-3.5 py-2 rounded-xl bg-green-600 hover:bg-green-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm"
+                      >
+                        <MessageCircle className="w-3.5 h-3.5" />
+                        <span>واٹس ایپ پر رابطہ</span>
+                      </a>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteForUser(msg)}
+                      className="min-h-[42px] px-3.5 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1.5 transition shadow-sm cursor-pointer"
                     >
-                      <MessageCircle className="w-3.5 h-3.5" />
-                      <span>واٹس ایپ پر رابطہ</span>
-                    </a>
+                      <Trash2 className="w-4 h-4" />
+                      <span>پیغام حذف کریں</span>
+                    </button>
                   </div>
                 </div>
               );
             })
           )}
         </div>
+
+        {/* PART C1: 5-Second Undo Toast ("واپس کریں") */}
+        {undoDeleteToast && (
+          <div className="bg-stone-900 text-white px-4 py-3 border-t-2 border-amber-400 flex items-center justify-between gap-3 shrink-0 font-nastaliq">
+            <span className="text-xs sm:text-sm font-bold text-amber-200">
+              پیغام آپ کی طرف سے حذف کر دیا گیا ہے۔
+            </span>
+            <button
+              type="button"
+              onClick={handleUndoDelete}
+              className="min-h-[40px] px-4 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold rounded-xl text-xs shadow cursor-pointer"
+            >
+              ↩ واپس کریں (5 سیکنڈ)
+            </button>
+          </div>
+        )}
+
+        {/* PART C1: Simple Urdu Confirmation Dialog before deleting */}
+        {pendingDeleteTarget && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 font-nastaliq">
+            <div className="bg-white border-2 border-red-500 rounded-3xl max-w-md w-full p-5 shadow-2xl space-y-4 text-right animate-in zoom-in-95 duration-150">
+              <div className="flex items-center gap-2.5 text-red-700">
+                <div className="w-10 h-10 rounded-2xl bg-red-100 flex items-center justify-center shrink-0">
+                  <Trash2 className="w-5 h-5 text-red-600" />
+                </div>
+                <h4 className="text-base sm:text-lg font-bold text-stone-900">
+                  پیغام حذف کرنے کی تصدیق
+                </h4>
+              </div>
+
+              <p className="text-sm sm:text-base text-stone-800 leading-[2.0] font-bold bg-red-50/70 p-3.5 rounded-2xl border border-red-200">
+                کیا آپ یہ پیغام اپنی طرف سے حذف کرنا چاہتے ہیں؟ دوسرے شخص کو یہ پیغام پھر بھی نظر آئے گا۔
+              </p>
+
+              <div className="grid grid-cols-2 gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={confirmDeleteForUser}
+                  className="min-h-[48px] px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-2xl text-sm shadow-md cursor-pointer transition active:scale-95"
+                >
+                  ہاں، حذف کریں
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPendingDeleteTarget(null)}
+                  className="min-h-[48px] px-4 py-2.5 bg-stone-200 hover:bg-stone-300 text-stone-900 font-bold rounded-2xl text-sm cursor-pointer transition active:scale-95"
+                >
+                  نہیں
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

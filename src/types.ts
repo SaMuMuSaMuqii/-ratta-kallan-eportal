@@ -447,3 +447,16 @@ export interface AdminAlertItem {
   isResolved?: boolean;
 }
 
+export interface BannerBenefitPair {
+  id: string;
+  useUrdu: string;
+  benefitUrdu: string;
+  isHidden?: boolean;
+}
+
+export interface BannerBenefitsStripConfig {
+  hideAll?: boolean;
+  pairs: BannerBenefitPair[];
+  updatedAt: string;
+}
+

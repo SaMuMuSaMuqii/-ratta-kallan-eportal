@@ -29,6 +29,8 @@ import {
   RoleAssignmentDoc,
   AdminLogEntry,
   UserRoles,
+  BannerBenefitPair,
+  BannerBenefitsStripConfig,
 } from '../types';
 import {
   initialProfiles,
@@ -637,6 +639,110 @@ export async function saveMessageToFirestore(message: VillageMessage): Promise<v
   if (!isFirebaseConfigured()) return;
   const docRef = doc(db, 'messages', message.id);
   await setDoc(docRef, message, { merge: true });
+}
+
+export async function deleteMessageFromFirestore(messageId: string): Promise<void> {
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return;
+  const docRef = doc(db, 'messages', messageId);
+  await deleteDoc(docRef);
+}
+
+export const LOCAL_BANNER_BENEFITS_STRIP_KEY = 'rk_banner_benefits_strip_v1';
+
+export const DEFAULT_BANNER_BENEFIT_PAIRS: BannerBenefitPair[] = [
+  {
+    id: 'pair-1',
+    useUrdu: 'استعمال: گاؤں کے مستری، مزدور، دکاندار اور ڈاکٹر ایک جگہ تلاش کریں۔',
+    benefitUrdu: 'فائدہ: روزگار اور کام گھر بیٹھے ملتا ہے۔',
+    isHidden: false,
+  },
+  {
+    id: 'pair-2',
+    useUrdu: 'استعمال: مسجد، اسکول، ہسپتال اور گاڑیوں کے اوقات دیکھیں۔',
+    benefitUrdu: 'فائدہ: وقت اور پیسہ بچتا ہے۔',
+    isHidden: false,
+  },
+  {
+    id: 'pair-3',
+    useUrdu: 'استعمال: بول کر سوال پوچھیں، لکھنا ضروری نہیں۔',
+    benefitUrdu: 'فائدہ: ان پڑھ بھائی بہن بھی آسانی سے استعمال کر سکتے ہیں۔',
+    isHidden: false,
+  },
+  {
+    id: 'pair-4',
+    useUrdu: 'استعمال: خبریں، ہنگامی نمبر اور مفت آن لائن اسکول۔',
+    benefitUrdu: 'فائدہ: پورا پورٹل بالکل مفت ہے۔',
+    isHidden: false,
+  },
+];
+
+export function getDefaultBannerBenefitsStripConfig(): BannerBenefitsStripConfig {
+  return {
+    hideAll: false,
+    pairs: DEFAULT_BANNER_BENEFIT_PAIRS.map((p) => ({ ...p })),
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+export function loadBannerBenefitsStripConfigSync(): BannerBenefitsStripConfig {
+  try {
+    const raw = localStorage.getItem(LOCAL_BANNER_BENEFITS_STRIP_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as BannerBenefitsStripConfig;
+      if (parsed && Array.isArray(parsed.pairs) && parsed.pairs.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {}
+  return getDefaultBannerBenefitsStripConfig();
+}
+
+export async function loadBannerBenefitsStripConfig(): Promise<BannerBenefitsStripConfig> {
+  const localFallback = loadBannerBenefitsStripConfigSync();
+  if (!isFirebaseConfigured()) return localFallback;
+  try {
+    recordFirestoreRead(1);
+    const snap = await getDoc(doc(db, 'settings', 'bannerBenefitsStrip'));
+    if (snap.exists()) {
+      const data = snap.data() as BannerBenefitsStripConfig;
+      if (data && Array.isArray(data.pairs) && data.pairs.length > 0) {
+        try {
+          localStorage.setItem(LOCAL_BANNER_BENEFITS_STRIP_KEY, JSON.stringify(data));
+        } catch {}
+        return data;
+      }
+    }
+  } catch (e) {
+    console.warn('Fallback to local banner benefits strip config:', e);
+  }
+  return localFallback;
+}
+
+export async function saveBannerBenefitsStripConfig(
+  config: BannerBenefitsStripConfig
+): Promise<void> {
+  const payload: BannerBenefitsStripConfig = {
+    hideAll: Boolean(config.hideAll),
+    pairs:
+      Array.isArray(config.pairs) && config.pairs.length > 0
+        ? config.pairs
+        : DEFAULT_BANNER_BENEFIT_PAIRS.map((p) => ({ ...p })),
+    updatedAt: new Date().toISOString(),
+  };
+  try {
+    localStorage.setItem(LOCAL_BANNER_BENEFITS_STRIP_KEY, JSON.stringify(payload));
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('rk-banner-benefits-updated', { detail: payload }));
+    }
+  } catch {}
+  if (!isFirebaseConfigured()) return;
+  try {
+    recordFirestoreWrite(1);
+    await setDoc(doc(db, 'settings', 'bannerBenefitsStrip'), payload, { merge: true });
+  } catch (e) {
+    console.warn('Error saving bannerBenefitsStrip to Firestore settings:', e);
+  }
 }
 
 export async function saveNewsEventToFirestore(news: VillageNewsEvent): Promise<void> {

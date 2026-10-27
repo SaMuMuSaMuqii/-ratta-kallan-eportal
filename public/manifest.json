@@ -1,25 +1,30 @@
 {
+  "id": "/",
   "short_name": "رتہ کلاں",
   "name": "رتہ کلاں پورٹل (Ratta Kallan Village Portal)",
   "description": "رتہ کلاں جھنگ کی مفت عوامی ڈائریکٹری، روزگار پورٹل، مساجد، اسکول اور پبلک ٹرانسپورٹ",
   "icons": [
     {
-      "src": "/favicon.ico",
-      "sizes": "64x64 32x32 24x24 16x16",
-      "type": "image/x-icon"
+      "src": "/logo.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
     },
     {
-      "src": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=192&auto=format&fit=crop&q=80",
+      "src": "/logo.png",
+      "sizes": "512x512",
       "type": "image/png",
-      "sizes": "192x192"
+      "purpose": "any"
     },
     {
-      "src": "https://images.unsplash.com/photo-1542314831-068cd1dbfeeb?w=512&auto=format&fit=crop&q=80",
+      "src": "/logo.png",
+      "sizes": "512x512",
       "type": "image/png",
-      "sizes": "512x512"
+      "purpose": "maskable"
     }
   ],
   "start_url": "/",
+  "scope": "/",
   "background_color": "#064e3b",
   "theme_color": "#047857",
   "display": "standalone",

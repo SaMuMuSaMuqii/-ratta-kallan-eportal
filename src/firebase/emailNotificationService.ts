@@ -222,6 +222,11 @@ export async function dispatchMessageNotificationEmail({
   message,
   portalUrl = typeof window !== 'undefined' ? window.location.origin : 'https://ratta-kallan.web.app',
 }: SendNotificationOptions): Promise<boolean> {
+  // PART C5: Never trigger or send email notification links for messages deleted by either party
+  if (message.deletedByRecipient || message.deletedBySender) {
+    return false;
+  }
+
   const email = recipientProfile.email?.trim();
   if (!email || !email.includes('@')) {
     return false;

@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { VillageProfile, Language, AuthUserSession } from '../types';
 import { playNotificationChime, speakText } from '../utils/speech';
+import { getPrivateProfileCredentials } from '../utils/privacySanitizer';
 
 interface ProfileAuthChallengeModalProps {
   isOpen: boolean;
@@ -64,8 +65,9 @@ export const ProfileAuthChallengeModal: React.FC<ProfileAuthChallengeModalProps>
       return;
     }
 
-    const validProfilePassword = profile.password || '';
-    const isProfileMatch = validProfilePassword && entered === validProfilePassword;
+    const privCreds = getPrivateProfileCredentials(profile.id);
+    const validProfilePassword = privCreds?.password || profile.password || '';
+    const isProfileMatch = Boolean(validProfilePassword && entered === validProfilePassword);
     const isMasterMatch = activeSession?.type === 'admin' || Boolean(activeSession?.roles?.admin);
 
     if (isProfileMatch || isMasterMatch) {

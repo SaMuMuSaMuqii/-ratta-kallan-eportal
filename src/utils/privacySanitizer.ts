@@ -455,3 +455,120 @@ export function verifyRoleAndOwnershipPermission(params: {
       return { allowed: false, errorUrdu: 'آپ کو اجازت نہیں' };
   }
 }
+
+/**
+ * STRICT ADMIN PASSWORD RESET EMAIL GUARD
+ * Only the official Super Admin email ("digitalworldonline777@gmail.com") is allowed
+ * to reset, recover, or change the Admin Panel password.
+ */
+const OFFICIAL_SUPER_ADMIN_RESET_EMAIL = 'digitalworldonline777@gmail.com';
+
+export function isAuthorizedSuperAdminResetEmail(email?: string | null): boolean {
+  if (!email) return false;
+  return email.trim().toLowerCase() === OFFICIAL_SUPER_ADMIN_RESET_EMAIL;
+}
+
+/**
+ * PRIVATE OWNER CREDENTIAL VAULT (Keyed by profile.id)
+ * Stored separately from the public directory (`ratta_kallan_profiles_v6`) and search index
+ * so that public profile cards and cached directory data NEVER contain any email, username, or password,
+ * while allowing each profile owner to log in or reset their own profile password using ONLY the email
+ * registered on their own profile.
+ */
+const PRIVATE_OWNER_AUTH_VAULT_KEY = 'rk_private_owner_auth_vault_v1';
+
+export interface PrivateProfileCredentialRecord {
+  profileId: string;
+  email?: string;
+  username?: string;
+  encodedPassword?: string;
+  updatedAt: string;
+}
+
+function readPrivateOwnerVault(): Record<string, PrivateProfileCredentialRecord> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(PRIVATE_OWNER_AUTH_VAULT_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {}
+  return {};
+}
+
+function writePrivateOwnerVault(vault: Record<string, PrivateProfileCredentialRecord>): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(PRIVATE_OWNER_AUTH_VAULT_KEY, JSON.stringify(vault));
+  } catch {}
+}
+
+export function savePrivateProfileCredentials(
+  profileId: string,
+  creds: { email?: string; username?: string; password?: string }
+): void {
+  if (!profileId) return;
+  const vault = readPrivateOwnerVault();
+  const existing = vault[profileId] || { profileId, updatedAt: new Date().toISOString() };
+
+  const cleanEmail = creds.email !== undefined ? creds.email.trim().toLowerCase() : existing.email;
+  const cleanUsername =
+    creds.username !== undefined ? creds.username.trim().toLowerCase() : existing.username;
+  const encodedPassword =
+    creds.password !== undefined && creds.password.trim().length > 0
+      ? btoa(unescape(encodeURIComponent(creds.password.trim())))
+      : existing.encodedPassword;
+
+  vault[profileId] = {
+    profileId,
+    email: cleanEmail,
+    username: cleanUsername,
+    encodedPassword,
+    updatedAt: new Date().toISOString(),
+  };
+  writePrivateOwnerVault(vault);
+}
+
+export function getPrivateProfileCredentials(profileId: string): {
+  email?: string;
+  username?: string;
+  password?: string;
+} | null {
+  if (!profileId) return null;
+  const vault = readPrivateOwnerVault();
+  const rec = vault[profileId];
+  if (!rec) return null;
+  let decodedPassword: string | undefined;
+  if (rec.encodedPassword) {
+    try {
+      decodedPassword = decodeURIComponent(escape(atob(rec.encodedPassword)));
+    } catch {}
+  }
+  return {
+    email: rec.email,
+    username: rec.username,
+    password: decodedPassword,
+  };
+}
+
+/**
+ * Finds the exact profile that registered with the given email address.
+ * Ensures a user can ONLY reset the password of the profile that owns that exact email.
+ */
+export function findProfileByRegisteredEmail(
+  enteredEmail: string,
+  profiles: VillageProfile[]
+): { profile: VillageProfile; email: string } | null {
+  const clean = (enteredEmail || '').trim().toLowerCase();
+  if (!clean || !clean.includes('@')) return null;
+
+  const vault = readPrivateOwnerVault();
+
+  for (const p of profiles) {
+    const vaultEmail = vault[p.id]?.email?.trim().toLowerCase();
+    const directEmail = (p.email || '').trim().toLowerCase();
+    if ((vaultEmail && vaultEmail === clean) || (directEmail && directEmail === clean)) {
+      return { profile: p, email: clean };
+    }
+  }
+  return null;
+}
+

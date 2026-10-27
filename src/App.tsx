@@ -120,6 +120,7 @@ import {
 import {
   sanitizePublicProfile,
   sanitizePublicProfileList,
+  savePrivateProfileCredentials,
   initialMandiRates,
   initialShelters,
   initialHelpGuides,
@@ -127,6 +128,7 @@ import {
 } from './utils/privacySanitizer';
 import {
   saveMessageToFirestore,
+  deleteMessageFromFirestore,
   saveProfileToFirestore,
   saveBannerSlideImageDoc,
   subscribeProfiles,
@@ -143,7 +145,7 @@ const STORAGE_PROFILES_KEY = 'ratta_kallan_profiles_v6';
 const STORAGE_MESSAGES_KEY = 'ratta_kallan_messages_v6';
 const STORAGE_DELETED_ARCHIVE_KEY = 'ratta_kallan_deleted_archive_v6';
 const STORAGE_ANNOUNCEMENTS_KEY = 'ratta_kallan_announcements_v6';
-const STORAGE_NEWS_KEY = 'ratta_kallan_news_events_v6';
+const STORAGE_NEWS_KEY = 'ratta_kallan_news_events_v7';
 const STORAGE_LANG_KEY = 'ratta_kallan_lang_v6';
 const STORAGE_FB_URL_KEY = 'ratta_kallan_fb_url_v6';
 const STORAGE_BG_IMAGE_KEY = 'ratta_kallan_bg_image_v6';
@@ -1111,6 +1113,11 @@ export default function App() {
     profileData: Omit<VillageProfile, 'id' | 'createdAt' | 'isVerified'> | VillageProfile
   ) => {
     if ('id' in profileData) {
+      savePrivateProfileCredentials(profileData.id, {
+        email: profileData.email,
+        username: profileData.username,
+        password: profileData.password,
+      });
       const cleanProfile = sanitizePublicProfile(profileData as VillageProfile);
       setProfiles((prev) => {
         const idx = prev.findIndex((p) => p.id === cleanProfile.id);
@@ -1124,9 +1131,15 @@ export default function App() {
       showToastNotification(`پروفائل "${cleanProfile.name}" محفوظ ہو گیا!`);
       return;
     }
+    const newProfileId = `profile-${Date.now()}`;
+    savePrivateProfileCredentials(newProfileId, {
+      email: profileData.email,
+      username: profileData.username,
+      password: profileData.password,
+    });
     const newProfile: VillageProfile = sanitizePublicProfile({
       ...profileData,
-      id: `profile-${Date.now()}`,
+      id: newProfileId,
       createdAt: new Date().toISOString(),
       isVerified: false,
       isApproved: true,
@@ -1385,9 +1398,10 @@ export default function App() {
       lang,
       () => setActiveCardAudioId(null),
       {
-        isFemaleVillageVoice: true,
+        isFemaleVillageVoice: false,
+        voiceGender: 'male',
         rate: getSpeechRate(),
-        pitch: 1.0,
+        pitch: 0.82,
       }
     );
   };
@@ -1412,9 +1426,10 @@ export default function App() {
       lang,
       () => setActiveCardAudioId(null),
       {
-        isFemaleVillageVoice: true,
+        isFemaleVillageVoice: false,
+        voiceGender: 'male',
         rate: getSpeechRate(),
-        pitch: 1.0,
+        pitch: 0.82,
       }
     );
   };
@@ -1440,9 +1455,10 @@ export default function App() {
       lang,
       () => setActiveCardAudioId(null),
       {
-        isFemaleVillageVoice: true,
+        isFemaleVillageVoice: false,
+        voiceGender: 'male',
         rate: getSpeechRate(),
-        pitch: 1.0,
+        pitch: 0.82,
       }
     );
   };
@@ -1469,9 +1485,10 @@ export default function App() {
       lang,
       () => setActiveCardAudioId(null),
       {
-        isFemaleVillageVoice: true,
+        isFemaleVillageVoice: false,
+        voiceGender: 'male',
         rate: getSpeechRate(),
-        pitch: 1.0,
+        pitch: 0.82,
       }
     );
   };
@@ -1565,7 +1582,7 @@ export default function App() {
     handleReplyDiscussion(messageId, replyText);
   };
 
-  // User Soft-Delete Message (Removes from user inbox & Archives permanently in Super Admin Vault)
+  // PART C2 & C3: Per-side Soft-Delete Message (persisted to Firestore; hard-deletes ONLY when both sides delete AND message is not reported)
   const handleDeleteMessageForUser = (messageId: string, role: 'sender' | 'receiver') => {
     const targetMsg = messages.find((m) => m.id === messageId);
     if (!targetMsg) return;
@@ -1594,25 +1611,73 @@ export default function App() {
 
     setDeletedMessagesArchive((prev) => [archiveItem, ...prev]);
 
-    // Update message state: soft-delete for user view
+    const updatedMsg: VillageMessage = {
+      ...targetMsg,
+      deletedBySender: role === 'sender' ? true : Boolean(targetMsg.deletedBySender),
+      deletedByRecipient: role === 'receiver' ? true : Boolean(targetMsg.deletedByRecipient),
+      deletedAt: new Date().toISOString(),
+      deletedByRole: role,
+    };
+
+    const bothSidesDeleted = Boolean(updatedMsg.deletedBySender && updatedMsg.deletedByRecipient);
+
+    // Update message state: keep reported messages for admin review, remove from active list only when both sides deleted and not reported
     setMessages((prev) =>
       prev
-        .map((m) => {
-          if (m.id !== messageId) return m;
-          return {
-            ...m,
-            deletedBySender: role === 'sender' ? true : m.deletedBySender,
-            deletedByRecipient: role === 'receiver' ? true : m.deletedByRecipient,
-            deletedAt: new Date().toISOString(),
-            deletedByRole: role,
-          };
-        })
-        .filter((m) => !(m.deletedBySender && m.deletedByRecipient))
+        .map((m) => (m.id === messageId ? updatedMsg : m))
+        .filter((m) => !(m.deletedBySender && m.deletedByRecipient && !m.isReported))
     );
 
-    showToastNotification(
-      'پیغام آپ کے ان باکس سے ہٹا دیا گیا۔ ریکارڈ کے تحفظ کے لیے سپر ایڈمن ثمر سعید کے پاس محفوظ ہے۔'
-    );
+    // Persist to Firestore
+    if (bothSidesDeleted && !updatedMsg.isReported) {
+      deleteMessageFromFirestore(messageId).catch(() => {});
+    } else {
+      saveMessageToFirestore(updatedMsg).catch(() => {});
+    }
+
+    showToastNotification('پیغام آپ کی طرف سے حذف کر دیا گیا۔');
+  };
+
+  // PART C1: Undo per-side message delete within 5 seconds
+  const handleUndoDeleteMessageForUser = (messageId: string, role: 'sender' | 'receiver') => {
+    setMessages((prev) => {
+      const existing = prev.find((m) => m.id === messageId);
+      if (existing) {
+        const restored: VillageMessage = {
+          ...existing,
+          deletedBySender: role === 'sender' ? false : existing.deletedBySender,
+          deletedByRecipient: role === 'receiver' ? false : existing.deletedByRecipient,
+        };
+        saveMessageToFirestore(restored).catch(() => {});
+        return prev.map((m) => (m.id === messageId ? restored : m));
+      }
+      // If it was removed because both sides deleted, restore from archive
+      const arc = deletedMessagesArchive.find((a) => a.originalMessageId === messageId);
+      if (arc) {
+        const restoredFromArc: VillageMessage = {
+          id: arc.originalMessageId,
+          targetProfileId: arc.targetProfileId,
+          targetProfileName: arc.targetProfileName,
+          targetMobile: arc.targetMobile,
+          senderProfileId: arc.senderProfileId,
+          senderName: arc.senderName,
+          senderMobile: arc.senderMobile,
+          messageText: arc.messageText,
+          audioData: arc.audioData,
+          audioDurationSeconds: arc.audioDurationSeconds,
+          inquiryType: 'general',
+          createdAt: arc.originalCreatedAt,
+          isRead: true,
+          discussionThread: arc.discussionThread || [],
+          deletedBySender: role === 'sender' ? false : true,
+          deletedByRecipient: role === 'receiver' ? false : true,
+        };
+        saveMessageToFirestore(restoredFromArc).catch(() => {});
+        return [restoredFromArc, ...prev];
+      }
+      return prev;
+    });
+    showToastNotification('پیغام واپس بحال کر دیا گیا ہے!');
   };
 
   // Super Admin Restore Message from Vault
@@ -2403,10 +2468,12 @@ export default function App() {
                 <Menu className="w-5 h-5 text-amber-300" />
               </button>
 
-              <div className="flex items-center gap-1.5">
-                <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-amber-400 to-amber-200 text-stone-950 flex items-center justify-center font-bold text-xs shadow">
-                  <Sparkles className="w-4 h-4 text-emerald-950" />
-                </div>
+              <div className="flex items-center gap-2">
+                <img
+                  src="/logo.png"
+                  alt="رتہ کلاں جھنگ پورٹل لوگو"
+                  className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-amber-400/90 shadow-md shrink-0 bg-emerald-950"
+                />
                 <div>
                   <h1 className="font-bold text-sm sm:text-base text-amber-200 font-nastaliq leading-tight">
                     رتہ کلاں جھنگ پورٹل
@@ -4132,6 +4199,7 @@ export default function App() {
         onReplyDiscussion={handleReplyDiscussion}
         onReply={handleReplyMessage}
         onDeleteMessageForUser={handleDeleteMessageForUser}
+        onUndoDeleteMessageForUser={handleUndoDeleteMessageForUser}
         onAdminDeleteMessage={handleDeleteMessage}
         onReportMessage={handleReportMessage}
         onOpenLoginModal={() => setIsAuthModalOpen(true)}

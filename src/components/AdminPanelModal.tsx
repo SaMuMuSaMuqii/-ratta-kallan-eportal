@@ -60,6 +60,7 @@ import {
 } from '../firebase/firestoreService';
 import { auth, isFirebaseConfigured } from '../firebase/config';
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
+import { isAuthorizedSuperAdminResetEmail } from '../utils/privacySanitizer';
 
 // Official Facebook Icon SVG
 export const FacebookIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -378,7 +379,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     if (!cleanEmail || !cleanEmail.includes('@')) {
       setRecoveryNotice({
         type: 'error',
-        text: 'براہ کرم اپنا درست ایڈمن ای میل ایڈریس (مثلاً name@example.com) درج کریں۔',
+        text: 'براہ کرم اپنا درست ایڈمن ای میل ایڈریس درج کریں۔',
+      });
+      return;
+    }
+
+    if (!isAuthorizedSuperAdminResetEmail(cleanEmail)) {
+      setRecoveryNotice({
+        type: 'error',
+        text: '❌ اجازت نہیں! صرف آفیشل سپر ایڈمن کی رجسٹرڈ ای میل (digitalworldonline777@gmail.com) کو ہی ایڈمن پینل کا پاس ورڈ ری سیٹ کرنے کی اجازت ہے۔ باقی تمام صارفین صرف اپنی پروفائل کی ای میل سے اپنا پاس ورڈ ری سیٹ کر سکتے ہیں۔',
       });
       return;
     }
@@ -440,11 +449,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   const handleResetAdminCredentials = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newAdminUser.trim() || !newAdminPin.trim()) {
-      alert('یوزر نیم اور پاس ورڈ خالی نہیں ہو سکتے۔');
+    const candidateEmail = newAdminUser.trim().toLowerCase();
+    if (!candidateEmail || !newAdminPin.trim()) {
+      alert('ایڈمن ای میل اور پاس ورڈ خالی نہیں ہو سکتے۔');
       return;
     }
-    const updated = { username: newAdminUser.trim(), pin: newAdminPin.trim() };
+    if (!isAuthorizedSuperAdminResetEmail(candidateEmail)) {
+      alert(
+        'صرف آفیشل سپر ایڈمن کی ای میل (digitalworldonline777@gmail.com) ہی ایڈمن پینل کا پاس ورڈ تبدیل یا ری سیٹ کر سکتی ہے۔'
+      );
+      return;
+    }
+    const updated = { username: candidateEmail, pin: newAdminPin.trim() };
     setAdminCreds(updated);
     localStorage.setItem(STORAGE_ADMIN_CREDS_KEY, JSON.stringify(updated));
     setAdminCredsSuccess(true);

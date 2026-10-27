@@ -247,18 +247,26 @@ service cloud.firestore {
     // ===============================================================
     // 7. Confidential Two-Way Messages (/messages/{messageId})
     // Normal user can read/write ONLY their own sent or received messages.
+    // Sender can only set deletedBySender (never deletedByRecipient or messageText/senderUid/recipientUid).
+    // Recipient can only set deletedByRecipient, isRead, and reply fields (never deletedBySender or messageText/senderUid/recipientUid).
     // Admin can read a private message ONLY when it was reported (resource.data.isReported == true).
     // ===============================================================
     match /messages/{messageId} {
       allow create: if isSignedIn() &&
         !isAccountDisabled() &&
         isValidId(messageId) &&
-        request.resource.data.senderUid == request.auth.uid;
+        request.resource.data.senderUid == request.auth.uid &&
+        request.resource.data.recipientUid is string &&
+        request.resource.data.deletedBySender != true &&
+        request.resource.data.deletedByRecipient != true;
 
       allow get, list: if (
         isSignedIn() &&
         !isAccountDisabled() &&
-        (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid)
+        (
+          (resource.data.senderUid == request.auth.uid && resource.data.deletedBySender != true) ||
+          (resource.data.recipientUid == request.auth.uid && resource.data.deletedByRecipient != true)
+        )
       ) || (
         isAdmin() && resource.data.isReported == true
       );
@@ -267,14 +275,61 @@ service cloud.firestore {
         (
           isSignedIn() &&
           !isAccountDisabled() &&
-          (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid)
+          resource.data.senderUid == request.auth.uid &&
+          request.resource.data.senderUid == resource.data.senderUid &&
+          request.resource.data.recipientUid == resource.data.recipientUid &&
+          request.resource.data.messageText == resource.data.messageText &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'deletedBySender',
+            'deletedAt',
+            'deletedByRole',
+            'isReported',
+            'reportReason',
+            'reportedBy',
+            'reportedAt',
+            'discussionThread',
+            'replyText',
+            'replyCreatedAt'
+          ])
+        ) ||
+        (
+          isSignedIn() &&
+          !isAccountDisabled() &&
+          resource.data.recipientUid == request.auth.uid &&
+          request.resource.data.senderUid == resource.data.senderUid &&
+          request.resource.data.recipientUid == resource.data.recipientUid &&
+          request.resource.data.messageText == resource.data.messageText &&
+          request.resource.data.createdAt == resource.data.createdAt &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+            'deletedByRecipient',
+            'deletedAt',
+            'deletedByRole',
+            'isRead',
+            'replyText',
+            'replyCreatedAt',
+            'discussionThread',
+            'isReported',
+            'reportReason',
+            'reportedBy',
+            'reportedAt'
+          ])
         ) ||
         (isAdmin() && resource.data.isReported == true)
       );
 
       allow delete: if isValidId(messageId) && (
         isAdmin() ||
-        (isSignedIn() && !isAccountDisabled() && (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid))
+        (
+          isSignedIn() &&
+          !isAccountDisabled() &&
+          resource.data.isReported != true &&
+          (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid) &&
+          (
+            (resource.data.senderUid == request.auth.uid && resource.data.deletedByRecipient == true) ||
+            (resource.data.recipientUid == request.auth.uid && resource.data.deletedBySender == true)
+          )
+        )
       );
     }
 

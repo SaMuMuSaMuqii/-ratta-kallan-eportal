@@ -96,9 +96,11 @@ export const MainMenuDrawer: React.FC<MainMenuDrawerProps> = ({
         {/* Drawer Header */}
         <div className="p-4 bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-950 border-b border-emerald-800 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center font-bold">
-              <Sparkles className="w-5 h-5 text-emerald-950" />
-            </div>
+            <img
+              src="/logo.png"
+              alt="رتہ کلاں جھنگ پورٹل لوگو"
+              className="w-10 h-10 rounded-xl object-cover border border-amber-400 shadow-md shrink-0 bg-emerald-950"
+            />
             <div>
               <h3 className="font-bold text-base font-nastaliq text-amber-200 leading-tight">
                 رتہ کلاں جھنگ پورٹل

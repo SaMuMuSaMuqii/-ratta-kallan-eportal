@@ -9,9 +9,31 @@ if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
 let cachedVoices: SpeechSynthesisVoice[] = [];
 let voicesLoaded = false;
 
-// Global speed preference (Default 0.95x for natural, calm Pakistani cadence)
-let globalSpeechRate = 0.95;
-let globalSpeechPitch = 1.0;
+// Energetic, clear, respectful ~40yo Pakistani male neighbour cadence (Rate 1.02, Pitch 0.82)
+export const DEFAULT_MALE_ASSISTANT_RATE = 1.02;
+export const DEFAULT_MALE_ASSISTANT_PITCH = 0.82;
+
+let globalSpeechRate = DEFAULT_MALE_ASSISTANT_RATE;
+let globalSpeechPitch = DEFAULT_MALE_ASSISTANT_PITCH;
+let useServerVoice = false;
+
+export const setUseServerVoice = (enabled: boolean) => {
+  useServerVoice = Boolean(enabled);
+  try {
+    localStorage.setItem('rk_use_server_voice_v1', enabled ? '1' : '0');
+  } catch {}
+};
+
+export const getUseServerVoice = (): boolean => {
+  if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('rk_use_server_voice_v1');
+      if (saved === '1') useServerVoice = true;
+      else if (saved === '0') useServerVoice = false;
+    } catch {}
+  }
+  return useServerVoice;
+};
 
 export const setSpeechRate = (rate: number) => {
   if (rate >= 0.7 && rate <= 2.0) {
@@ -407,8 +429,155 @@ export const splitTextIntoUrduChunks = (text: string, maxLen = 140): string[] =>
   return chunks.length ? chunks : [clean];
 };
 
+const FEMALE_VOICE_NAME_KEYWORDS = [
+  'female',
+  'zira',
+  'uzma',
+  'salma',
+  'swara',
+  'kalpana',
+  'heera',
+  'sabina',
+  'samantha',
+  'victoria',
+  'veena',
+  'lekha',
+  'neerja',
+];
+
+const MALE_VOICE_NAME_KEYWORDS = [
+  'asad',
+  'male',
+  'hemant',
+  'madhur',
+  'salman',
+  'fahad',
+  'hamza',
+  'bilal',
+  'prabhat',
+  'ravi',
+];
+
+export const isClearlyFemaleVoice = (voice: SpeechSynthesisVoice): boolean => {
+  const n = (voice.name || '').toLowerCase();
+  const uri = (voice.voiceURI || '').toLowerCase();
+  return FEMALE_VOICE_NAME_KEYWORDS.some((kw) => n.includes(kw) || uri.includes(kw));
+};
+
+export const isSuggestedMaleVoice = (voice: SpeechSynthesisVoice): boolean => {
+  if (isClearlyFemaleVoice(voice)) return false;
+  const n = (voice.name || '').toLowerCase();
+  const uri = (voice.voiceURI || '').toLowerCase();
+  return MALE_VOICE_NAME_KEYWORDS.some((kw) => n.includes(kw) || uri.includes(kw));
+};
+
 /**
- * Web Speech API fallback engine when network audio is unavailable
+ * PART D1 & D2: Central function getAssistantVoice() in src/utils/speech.ts
+ * Selects the best energetic ~40yo Pakistani male voice from browser speechSynthesis:
+ * 1. An Urdu (ur-PK or ur-IN) voice whose name suggests a male voice ("Asad", "Male", "Hemant", "Madhur", etc.)
+ * 2. Any ur voice that is not clearly female
+ * 3. A Punjabi (pa) or Hindi (hi) male voice if no Urdu male voice exists on the device
+ * 4. Any available Urdu voice (excluding female voices if any non-female option exists)
+ * Never picks a voice whose name contains "female", "zira", "uzma", "salma", "swara", "kalpana".
+ */
+export const getAssistantVoice = (lang: Language = 'ur'): SpeechSynthesisVoice | undefined => {
+  const voices = getAvailableVoices();
+  if (!voices.length) return undefined;
+
+  const nonFemaleVoices = voices.filter((v) => !isClearlyFemaleVoice(v));
+
+  if (lang === 'en') {
+    return (
+      nonFemaleVoices.find(
+        (v) => v.lang.toLowerCase().startsWith('en') && isSuggestedMaleVoice(v)
+      ) ||
+      nonFemaleVoices.find((v) => v.lang.toLowerCase().startsWith('en')) ||
+      nonFemaleVoices[0]
+    );
+  }
+
+  // Priority 1: Urdu (ur-PK or ur-IN or ur*) voice whose name suggests a male voice
+  const urduMale = nonFemaleVoices.find((v) => {
+    const l = v.lang.toLowerCase();
+    return (l === 'ur-pk' || l === 'ur-in' || l.startsWith('ur')) && isSuggestedMaleVoice(v);
+  });
+  if (urduMale) return urduMale;
+
+  // Priority 2: Any ur voice that is not clearly female (prefer ur-PK first)
+  const urduPkNotFemale = nonFemaleVoices.find((v) => v.lang.toLowerCase() === 'ur-pk');
+  if (urduPkNotFemale) return urduPkNotFemale;
+
+  const urduAnyNotFemale = nonFemaleVoices.find((v) => v.lang.toLowerCase().startsWith('ur'));
+  if (urduAnyNotFemale) return urduAnyNotFemale;
+
+  // Priority 3: Punjabi (pa) or Hindi (hi) male voice if no Urdu male voice exists on the device
+  const punjabiOrHindiMale = nonFemaleVoices.find((v) => {
+    const l = v.lang.toLowerCase();
+    return (l.startsWith('pa') || l.startsWith('hi')) && isSuggestedMaleVoice(v);
+  });
+  if (punjabiOrHindiMale) return punjabiOrHindiMale;
+
+  const punjabiOrHindiNotFemale = nonFemaleVoices.find((v) => {
+    const l = v.lang.toLowerCase();
+    return l.startsWith('pa') || l.startsWith('hi');
+  });
+  if (punjabiOrHindiNotFemale) return punjabiOrHindiNotFemale;
+
+  // Priority 4: Any available non-female voice for South Asia (PK / IN)
+  const regionMale = nonFemaleVoices.find((v) => {
+    const l = v.lang.toLowerCase();
+    return l.includes('pk') || l.includes('in');
+  });
+  if (regionMale) return regionMale;
+
+  return nonFemaleVoices[0];
+};
+
+/**
+ * PART D5: Optional server voice helper (useServerVoice = false by default).
+ * Calls a server / Cloud Function endpoint (/api/tts) for ur-PK-AsadNeural without any API key in frontend code.
+ */
+async function trySpeakViaOptionalServerEndpoint(
+  cleanText: string,
+  rate: number,
+  onEnd?: () => void
+): Promise<boolean> {
+  if (!getUseServerVoice()) return false;
+  try {
+    const response = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        text: cleanText,
+        voice: 'ur-PK-AsadNeural',
+        rate,
+        pitch: DEFAULT_MALE_ASSISTANT_PITCH,
+      }),
+    });
+    if (!response.ok) return false;
+    const blob = await response.blob();
+    if (!blob || blob.size === 0) return false;
+    const audioUrl = URL.createObjectURL(blob);
+    const audio = new Audio(audioUrl);
+    currentAudioElement = audio;
+    audio.playbackRate = Math.max(0.85, Math.min(1.4, rate));
+    audio.onended = () => {
+      URL.revokeObjectURL(audioUrl);
+      if (onEnd) onEnd();
+    };
+    audio.onerror = () => {
+      URL.revokeObjectURL(audioUrl);
+      if (onEnd) onEnd();
+    };
+    await audio.play();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Web Speech API engine using the ~40yo energetic Pakistani male voice (getAssistantVoice)
  */
 export const speakViaWebSpeech = (
   cleanText: string,
@@ -427,95 +596,89 @@ export const speakViaWebSpeech = (
     return;
   }
 
-  try {
-    synth.cancel();
-    if (synth.paused) {
-      synth.resume();
+  const executeSpeak = () => {
+    if (!synth) {
+      if (onEnd) onEnd();
+      return;
     }
-
-    if (!cachedVoices.length) {
-      loadVoices();
-    }
-    const voices = cachedVoices.length ? cachedVoices : (synth.getVoices() || []);
-    const requestedGender =
-      options?.voiceGender || (options?.isFemaleVillageVoice === true ? 'female' : 'male');
-
-    let targetVoice: SpeechSynthesisVoice | undefined;
-
-    // 1. Urdu voice matching requested gender
-    if (requestedGender === 'male') {
-      targetVoice = voices.find(
-        (v) =>
-          (v.lang.toLowerCase() === 'ur-pk' || v.lang.toLowerCase().startsWith('ur')) &&
-          (v.name.toLowerCase().includes('male') ||
-            v.name.toLowerCase().includes('asad') ||
-            v.name.toLowerCase().includes('salman'))
-      );
-    } else {
-      targetVoice = voices.find(
-        (v) =>
-          (v.lang.toLowerCase() === 'ur-pk' || v.lang.toLowerCase().startsWith('ur')) &&
-          (v.name.toLowerCase().includes('female') ||
-            v.name.toLowerCase().includes('uzma') ||
-            v.name.toLowerCase().includes('pakistan'))
-      );
-    }
-
-    if (!targetVoice) {
-      targetVoice = voices.find(
-        (v) => v.lang.toLowerCase() === 'ur-pk' || v.lang.toLowerCase().startsWith('ur')
-      );
-    }
-
-    // 2. Punjabi fallback (Never switch to Hindi)
-    if (!targetVoice && lang === 'pa') {
-      targetVoice = voices.find((v) => v.lang.toLowerCase().startsWith('pa'));
-    }
-
-    // 3. Intelligible phonetic Roman Urdu fallback for English-only browser voices
-    let textToSpeak = cleanText;
-    if (!targetVoice) {
-      textToSpeak = urduToRomanUrdu(cleanText);
-      targetVoice =
-        voices.find(
-          (v) => v.lang.toLowerCase().includes('in') || v.lang.toLowerCase().includes('pk')
-        ) || voices[0];
-    }
-
-    const utterance = new SpeechSynthesisUtterance(textToSpeak);
-    if (targetVoice) {
-      utterance.voice = targetVoice;
-      utterance.lang = targetVoice.lang;
-    } else {
-      utterance.lang = lang === 'en' ? 'en-US' : 'ur-PK';
-    }
-
-    utterance.rate = options?.rate ?? (lang === 'en' ? 1.0 : getSpeechRate());
-    utterance.pitch = options?.pitch ?? (requestedGender === 'male' ? 0.95 : 1.0);
-    utterance.volume = options?.volume ?? 1.0;
-
-    let finished = false;
-    const finishHandler = () => {
-      if (!finished) {
-        finished = true;
-        if (onEnd) onEnd();
+    try {
+      synth.cancel();
+      if (synth.paused) {
+        synth.resume();
       }
-    };
 
-    utterance.onend = finishHandler;
-    utterance.onerror = () => finishHandler();
+      const targetVoice = getAssistantVoice(lang);
+      const isTargetUrduOrSouthAsian =
+        targetVoice &&
+        (targetVoice.lang.toLowerCase().startsWith('ur') ||
+          targetVoice.lang.toLowerCase().startsWith('pa') ||
+          targetVoice.lang.toLowerCase().startsWith('hi'));
 
-    synth.speak(utterance);
-  } catch (err) {
-    console.warn('Web speech fallback failed:', err);
-    if (onEnd) onEnd();
+      // Intelligible phonetic Roman Urdu fallback ONLY if device has neither Urdu nor Punjabi/Hindi voice
+      const textToSpeak =
+        lang === 'en' || isTargetUrduOrSouthAsian ? cleanText : urduToRomanUrdu(cleanText);
+
+      const utterance = new SpeechSynthesisUtterance(textToSpeak);
+      if (targetVoice) {
+        utterance.voice = targetVoice;
+        utterance.lang = targetVoice.lang;
+      } else {
+        utterance.lang = lang === 'en' ? 'en-US' : 'ur-PK';
+      }
+
+      // Energetic ~40yo Pakistani male voice: rate ~1.02 (or user's saved speed), pitch ~0.82
+      const effectiveRate = options?.rate ?? (lang === 'en' ? 1.0 : getSpeechRate());
+      const effectivePitch =
+        options?.pitch && options.pitch < 0.95
+          ? options.pitch
+          : DEFAULT_MALE_ASSISTANT_PITCH;
+
+      utterance.rate = Math.max(0.75, Math.min(1.6, effectiveRate));
+      utterance.pitch = effectivePitch;
+      utterance.volume = options?.volume ?? 1.0;
+
+      let finished = false;
+      const finishHandler = () => {
+        if (!finished) {
+          finished = true;
+          if (onEnd) onEnd();
+        }
+      };
+
+      utterance.onend = finishHandler;
+      utterance.onerror = () => finishHandler();
+
+      synth.speak(utterance);
+    } catch (err) {
+      console.warn('Web speech fallback failed:', err);
+      if (onEnd) onEnd();
+    }
+  };
+
+  // Wait for speechSynthesis.onvoiceschanged if voices have not populated yet (Android Chrome)
+  if (!voicesLoaded && (!cachedVoices || cachedVoices.length === 0)) {
+    loadVoices();
+    if (!cachedVoices.length && 'onvoiceschanged' in synth) {
+      let triggered = false;
+      const runOnce = () => {
+        if (triggered) return;
+        triggered = true;
+        loadVoices();
+        executeSpeak();
+      };
+      synth.addEventListener?.('voiceschanged', runOnce, { once: true });
+      setTimeout(runOnce, 250);
+      return;
+    }
   }
+
+  executeSpeak();
 };
 
 /**
- * Universal Speak Text in Clear Pakistani Urdu
- * Tier 1: Streams authentic high-fidelity native Urdu audio from neural TTS.
- * Tier 2: Seamlessly falls back to Web Speech API without double-cancellation.
+ * Universal Speak Text in Clear Pakistani Urdu (Energetic ~40yo Male Voice)
+ * - Uses browser male voice via getAssistantVoice() first when available so pitch (0.82) & male voice selection are guaranteed.
+ * - If useServerVoice is enabled (Part D5), tries the optional server endpoint (/api/tts) first and silently falls back.
  */
 export const speakText = (
   text: string,
@@ -547,64 +710,30 @@ export const speakText = (
     return false;
   }
 
-  // If English is explicitly selected, use Web Speech API
-  if (lang === 'en') {
-    speakViaWebSpeech(cleanText, lang, onEnd, options);
+  const effectiveRate = options?.rate ?? getSpeechRate();
+  const maleOptions = {
+    ...options,
+    isFemaleVillageVoice: false,
+    voiceGender: 'male' as const,
+    rate: effectiveRate,
+    pitch:
+      options?.pitch && options.pitch < 0.95
+        ? options.pitch
+        : DEFAULT_MALE_ASSISTANT_PITCH,
+  };
+
+  // Optional Server Voice (Part D5 - default false; falls back silently if disabled or fails)
+  if (getUseServerVoice()) {
+    trySpeakViaOptionalServerEndpoint(cleanText, effectiveRate, onEnd).then((played) => {
+      if (!played) {
+        speakViaWebSpeech(cleanText, lang, onEnd, maleOptions);
+      }
+    });
     return true;
   }
 
-  // Primary Native Urdu Neural Streaming Engine:
-  // Breaks text into sentence chunks and plays sequential high-quality audio
-  const chunks = splitTextIntoUrduChunks(cleanText, 140);
-  if (!chunks.length) {
-    if (onEnd) onEnd();
-    return false;
-  }
-
-  currentAudioQueue = chunks;
-  currentAudioIndex = 0;
-  currentAudioOnEnd = onEnd || null;
-  isAudioEnginePlaying = true;
-
-  const playNextChunk = () => {
-    if (!isAudioEnginePlaying) return;
-    if (currentAudioIndex >= currentAudioQueue.length) {
-      stopSpeaking();
-      return;
-    }
-
-    const chunk = currentAudioQueue[currentAudioIndex];
-    currentAudioIndex++;
-    const ttsUrl = `https://translate.google.com/translate_tts?ie=UTF-8&tl=ur&client=tw-ob&q=${encodeURIComponent(
-      chunk
-    )}`;
-
-    const audio = new Audio(ttsUrl);
-    currentAudioElement = audio;
-
-    const speechRate = options?.rate ?? getSpeechRate();
-    audio.playbackRate = Math.max(0.85, Math.min(1.4, speechRate));
-
-    audio.onended = () => {
-      playNextChunk();
-    };
-
-    audio.onerror = (e) => {
-      console.warn('Audio stream error, falling back to Web Speech API:', e);
-      const remaining = currentAudioQueue.slice(currentAudioIndex - 1).join(' ');
-      stopSpeaking();
-      speakViaWebSpeech(remaining, lang, onEnd, options);
-    };
-
-    audio.play().catch((err) => {
-      console.warn('Audio play() error, falling back to Web Speech API:', err);
-      const remaining = currentAudioQueue.slice(currentAudioIndex - 1).join(' ');
-      stopSpeaking();
-      speakViaWebSpeech(remaining, lang, onEnd, options);
-    });
-  };
-
-  playNextChunk();
+  // Free browser speech synthesis using getAssistantVoice() with pitch 0.82 & rate 1.02
+  speakViaWebSpeech(cleanText, lang, onEnd, maleOptions);
   return true;
 };
 
@@ -766,7 +895,8 @@ export const toggleCardSpeech = (
       lang,
       () => setPlayingId(null),
       {
-        isFemaleVillageVoice: true,
+        isFemaleVillageVoice: false,
+        voiceGender: 'male',
         rate: getSpeechRate(),
         pitch: globalSpeechPitch,
       }

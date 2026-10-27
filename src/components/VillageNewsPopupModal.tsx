@@ -17,7 +17,7 @@ import {
   Activity,
   Trophy,
 } from 'lucide-react';
-import { VillageNewsEvent, Language, EventCategory } from '../types';
+import { VillageNewsEvent, Language, EventCategory, BannerBenefitsStripConfig } from '../types';
 import {
   speakText,
   stopSpeaking,
@@ -25,6 +25,11 @@ import {
   getSpeechRate,
   playNotificationChime,
 } from '../utils/speech';
+import {
+  loadBannerBenefitsStripConfig,
+  loadBannerBenefitsStripConfigSync,
+  DEFAULT_BANNER_BENEFIT_PAIRS,
+} from '../firebase/firestoreService';
 
 interface VillageNewsPopupModalProps {
   isOpen: boolean;
@@ -42,6 +47,20 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
   const [currentIndex, setCurrentIndex] = useState(0);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
   const [copiedShare, setCopiedShare] = useState(false);
+  const [stripConfig, setStripConfig] = useState<BannerBenefitsStripConfig>(() =>
+    loadBannerBenefitsStripConfigSync()
+  );
+
+  React.useEffect(() => {
+    if (!isOpen) return;
+    let mounted = true;
+    loadBannerBenefitsStripConfig().then((cfg) => {
+      if (mounted && cfg) setStripConfig(cfg);
+    });
+    return () => {
+      mounted = false;
+    };
+  }, [isOpen]);
 
   const handleClose = () => {
     stopSpeaking();
@@ -70,6 +89,16 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
   if (!isOpen || events.length === 0) return null;
 
   const currentEvent = events[currentIndex] || events[0];
+  const visibleBenefitPairs = (
+    stripConfig?.pairs && stripConfig.pairs.length > 0
+      ? stripConfig.pairs
+      : DEFAULT_BANNER_BENEFIT_PAIRS
+  ).filter((p) => !p.isHidden);
+
+  const currentBenefitPair =
+    !stripConfig?.hideAll && visibleBenefitPairs.length > 0
+      ? visibleBenefitPairs[currentIndex % visibleBenefitPairs.length]
+      : null;
 
   const getCategoryDetails = (cat: EventCategory) => {
     switch (cat) {
@@ -258,14 +287,116 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
         </div>
 
         {/* Event Content Body */}
-        <div className="p-5 sm:p-6 space-y-4 text-stone-800 overflow-y-auto max-h-[60vh]">
+        <div className="p-4 sm:p-6 space-y-4 text-stone-800 overflow-y-auto max-h-[65vh] font-nastaliq">
+          {/* Quick Slide Switcher inside Popup */}
+          {events.length > 1 && (
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              {events.map((ev, idx) => (
+                <button
+                  key={ev.id || idx}
+                  type="button"
+                  onClick={() => {
+                    stopSpeaking();
+                    setIsPlayingAudio(false);
+                    setCurrentIndex(idx);
+                  }}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer ${
+                    idx === currentIndex
+                      ? 'bg-emerald-800 text-amber-300 shadow'
+                      : 'bg-stone-100 hover:bg-stone-200 text-stone-700 border border-stone-300'
+                  }`}
+                >
+                  {idx === 0
+                    ? '🌟 1. پورٹل کے فوائد'
+                    : idx === 1
+                    ? '📲 2. استعمال کا طریقہ'
+                    : idx === 2
+                    ? '🎙️ 3. صوتی مددگار'
+                    : idx === 3
+                    ? '🏥 4. کمیونٹی خدمات'
+                    : `📢 خبر ${idx + 1}`}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Banner Illustration Image inside Main Popup */}
+          {!currentEvent.skipBannerImage && (
+            <div className="rounded-2xl overflow-hidden border-2 border-emerald-600/80 shadow-md bg-stone-950">
+              <img
+                src={currentEvent.imageUrl || '/banners/portal-benefits-banner.svg'}
+                alt={currentEvent.title}
+                className="w-full h-40 sm:h-52 object-cover"
+              />
+            </div>
+          )}
+
           {/* Main Title */}
-          <h2 className="text-xl sm:text-2xl font-bold font-nastaliq text-stone-900 leading-snug">
+          <h2 className="text-lg sm:text-xl font-bold font-nastaliq text-emerald-950 leading-snug">
             {currentEvent.title}
           </h2>
 
+          {/* Detailed Content (Preserves numbered step-by-step formatting) */}
+          <div className="bg-emerald-50/80 p-4 rounded-2xl border-2 border-emerald-300 text-stone-900 text-xs sm:text-sm leading-loose whitespace-pre-line font-bold shadow-2xs">
+            {currentEvent.content}
+          </div>
+
+          {/* PART A3: Compact Two-Line Uses & Benefits Strip inside Village News Popup */}
+          {currentBenefitPair && (
+            <div className="bg-emerald-950/95 border border-emerald-500 rounded-2xl px-3.5 py-2.5 text-white shadow-md space-y-1 pointer-events-none select-none">
+              <p className="text-xs font-bold text-amber-200 font-nastaliq leading-[1.85]">
+                {currentBenefitPair.useUrdu.trim().startsWith('استعمال:')
+                  ? currentBenefitPair.useUrdu.trim()
+                  : `استعمال: ${currentBenefitPair.useUrdu.trim()}`}
+              </p>
+              <p className="text-xs font-bold text-emerald-200 font-nastaliq leading-[1.85]">
+                {currentBenefitPair.benefitUrdu.trim().startsWith('فائدہ:')
+                  ? currentBenefitPair.benefitUrdu.trim()
+                  : `فائدہ: ${currentBenefitPair.benefitUrdu.trim()}`}
+              </p>
+            </div>
+          )}
+
+          {/* Permanent Step-by-Step Summary of App Benefits & Uses in Main Popup */}
+          <div className="bg-gradient-to-br from-amber-50 via-white to-emerald-50 border-2 border-amber-400 rounded-2xl p-3.5 sm:p-4 space-y-3 shadow-sm">
+            <div className="flex items-center justify-between gap-2 border-b border-amber-200 pb-2">
+              <h3 className="font-bold text-sm sm:text-base text-emerald-950">
+                📌 رتہ کلاں جھنگ ایپ کے فوائد اور استعمال کا طریقہ (ترتیب سے)
+              </h3>
+              <span className="text-[10px] font-bold bg-amber-400 text-stone-950 px-2 py-0.5 rounded-full shrink-0">
+                آسان گائیڈ
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs leading-relaxed">
+              {/* Column 1: Ordered Benefits */}
+              <div className="bg-white p-3 rounded-xl border border-emerald-200 space-y-1.5">
+                <strong className="block text-emerald-900 text-xs sm:text-sm border-b border-emerald-100 pb-1">
+                  ✅ ایپ کے 5 بڑے فوائد (Benefits):
+                </strong>
+                <p>1. <strong>فوری کاریگر و روزگار:</strong> مستری، مزدور، ٹریکٹر، الیکٹریشن، درزی اور دکاندار کا نمبر گھر بیٹھے حاصل کریں۔</p>
+                <p>2. <strong>بول کر تلاش:</strong> جو افراد پڑھ نہیں سکتے وہ مائیک دبا کر بولیں اور آواز میں جواب سنیں۔</p>
+                <p>3. <strong>ہنگامی طبی مدد:</strong> ریسکیو 1122، ہسپتال، ڈاکٹر، بلڈ ڈونرز اور سیلابی پناہ گاہوں کی فوری معلومات۔</p>
+                <p>4. <strong>مساجد، اسکول و منڈی:</strong> نماز اوقات، مفت AI اسکول، جھنگ گاڑیاں اور تازہ غلہ منڈی ریٹس۔</p>
+                <p>5. <strong>مکمل رازداری:</strong> کسی کا ای میل، یوزر نیم یا پاس ورڈ ہرگز ظاہر نہیں کیا جاتا۔</p>
+              </div>
+
+              {/* Column 2: Ordered Uses */}
+              <div className="bg-white p-3 rounded-xl border border-amber-200 space-y-1.5">
+                <strong className="block text-amber-900 text-xs sm:text-sm border-b border-amber-100 pb-1">
+                  📲 استعمال کے 5 آسان مراحل (How to Use):
+                </strong>
+                <p>1. <strong>پہلا قدم:</strong> اوپر سرچ بار میں نام لکھیں یا <strong>"بول کر پوچھیں"</strong> بٹن دبا کر بولیں۔</p>
+                <p>2. <strong>دوسرا قدم:</strong> کارڈ پر <strong>"کال"</strong> یا <strong>"واٹس ایپ"</strong> بٹن دبا کر سیدھا رابطہ کریں یا <strong>"سنیں 🔊"</strong> دبائیں۔</p>
+                <p>3. <strong>تیسرا قدم:</strong> اپنا کاروبار شامل کرنے کے لیے <strong>"+ اندراج"</strong> دبائیں اور اپنی ای میل و پاس ورڈ سے پروفائل بنائیں۔</p>
+                <p>4. <strong>چوتھا قدم:</strong> مزدور بھائی کام کے لیے <strong>"👷 آج دستیاب مزدور"</strong> بٹن آن کریں۔</p>
+                <p>5. <strong>پانچواں قدم:</strong> پاس ورڈ بھولنے پر صرف اپنی پروفائل کی رجسٹرڈ ای میل دے کر نیا پاس ورڈ بنائیں۔</p>
+              </div>
+            </div>
+          </div>
+
           {/* Quick Meta Pills: Date, Time, Location */}
-          <div className="grid grid-cols-1 gap-2 text-xs">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
             <div className="flex items-center gap-2 bg-stone-50 p-2.5 rounded-xl border border-stone-200">
               <Calendar className="w-4 h-4 text-emerald-700 shrink-0" />
               <span className="font-bold text-stone-900">تاریخ:</span>
@@ -285,11 +416,6 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
               <span className="font-bold text-stone-900">مقام:</span>
               <span className="text-stone-700 font-medium">{currentEvent.location}</span>
             </div>
-          </div>
-
-          {/* Detailed Content */}
-          <div className="bg-emerald-50/50 p-4 rounded-2xl border border-emerald-200/80 text-stone-900 text-sm sm:text-base leading-relaxed">
-            <p className="font-medium">{currentEvent.content}</p>
           </div>
 
           {/* Super Admin Badge */}

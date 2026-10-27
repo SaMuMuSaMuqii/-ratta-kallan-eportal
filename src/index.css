@@ -1,28 +1,100 @@
 @import "tailwindcss";
 
+/* PART B: Jameel Noori Nastaleeq Regular for Arabic & Urdu characters only */
+@font-face {
+  font-family: 'Jameel Noori Nastaleeq';
+  src:
+    local('Jameel Noori Nastaleeq'),
+    local('Jameel Noori Nastaleeq Regular'),
+    local('JameelNooriNastaleeq'),
+    url('/fonts/JameelNooriNastaleeqRegular.woff2') format('woff2'),
+    url('/fonts/JameelNooriNastaleeqRegular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0600-06FF, U+0750-077F, U+FB50-FDFF, U+FE70-FEFF;
+}
+
 @layer base {
   :root {
-    --font-urdu: 'Noto Sans Arabic', 'Noto Nastaliq Urdu', Tahoma, system-ui, sans-serif;
     --font-latin: 'Outfit', system-ui, -apple-system, sans-serif;
+    --font-urdu: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, 'Outfit', system-ui, sans-serif;
+    --font-sans: var(--font-urdu);
   }
 
+  html,
   body {
     font-family: var(--font-urdu);
+    line-height: 2;
+  }
+
+  /* Apply Jameel Noori Nastaleeq across all interactive & structural elements */
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  button,
+  input,
+  textarea,
+  select,
+  option,
+  label,
+  table,
+  th,
+  td,
+  nav,
+  footer,
+  dialog,
+  [role="dialog"] {
+    font-family: var(--font-urdu);
+    line-height: 1.8;
+  }
+
+  input::placeholder,
+  textarea::placeholder {
+    font-family: var(--font-urdu);
+    line-height: 1.8;
+  }
+
+  p,
+  li,
+  dd,
+  dt,
+  blockquote {
+    font-family: var(--font-urdu);
+    line-height: 2;
   }
 
   [dir="ltr"] {
-    font-family: var(--font-latin);
+    font-family: var(--font-latin), var(--font-urdu);
   }
 }
 
 /* Custom styles for high-legibility Urdu & Punjabi village UI */
-.font-nastaliq {
-  font-family: 'Noto Nastaliq Urdu', 'Noto Sans Arabic', serif;
-  line-height: 2.2 !important;
+.font-nastaliq,
+.font-urdu-clean,
+.font-sans {
+  font-family: var(--font-urdu) !important;
+  line-height: 1.95;
 }
 
-.font-urdu-clean {
-  font-family: 'Noto Sans Arabic', Tahoma, sans-serif;
+h1.font-nastaliq,
+h2.font-nastaliq,
+h3.font-nastaliq,
+h4.font-nastaliq,
+button.font-nastaliq,
+a.font-nastaliq {
+  line-height: 1.8 !important;
+}
+
+/* Prevent Nastaleeq ascenders/descenders from clipping in buttons, badges, and inputs */
+button,
+input,
+select,
+textarea {
+  overflow: visible;
 }
 
 /* Pulse animation for active voice recording */

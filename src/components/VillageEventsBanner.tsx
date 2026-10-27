@@ -14,7 +14,7 @@ import {
   Heart,
   MessageCircle,
 } from 'lucide-react';
-import { VillageNewsEvent, Language } from '../types';
+import { VillageNewsEvent, Language, BannerBenefitsStripConfig } from '../types';
 import {
   speakText,
   stopSpeaking,
@@ -23,7 +23,12 @@ import {
   playNotificationChime,
   cleanSpeechText,
 } from '../utils/speech';
-import { getBannerSlideImageDoc } from '../firebase/firestoreService';
+import {
+  getBannerSlideImageDoc,
+  loadBannerBenefitsStripConfig,
+  loadBannerBenefitsStripConfigSync,
+  DEFAULT_BANNER_BENEFIT_PAIRS,
+} from '../firebase/firestoreService';
 
 export const BANNER_AUTO_SCROLL_MS = 3000; // 3 seconds auto-scroll
 export const BANNER_TOUCH_PAUSE_MS = 10000; // 10 seconds pause after touch or swipe
@@ -59,6 +64,11 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
   // Lazy-loaded single image per slide cache (keyed by event.id)
   const [loadedSlideImages, setLoadedSlideImages] = useState<Record<string, string>>({});
 
+  // Admin-configurable uses & benefits strip (stored in settings/bannerBenefitsStrip)
+  const [stripConfig, setStripConfig] = useState<BannerBenefitsStripConfig>(() =>
+    loadBannerBenefitsStripConfigSync()
+  );
+
   // Touch swipe tracking refs
   const touchStartXRef = useRef<number | null>(null);
   const touchEndXRef = useRef<number | null>(null);
@@ -66,6 +76,26 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
   const safeEvents = events && events.length > 0 ? events : [];
   const activeIndex = safeEvents.length > 0 ? currentIndex % safeEvents.length : 0;
   const currentEvent = safeEvents[activeIndex];
+
+  useEffect(() => {
+    let mounted = true;
+    loadBannerBenefitsStripConfig().then((cfg) => {
+      if (mounted && cfg) setStripConfig(cfg);
+    });
+    const onStripUpdated = (e: Event) => {
+      const customEv = e as CustomEvent<BannerBenefitsStripConfig>;
+      if (customEv.detail) {
+        setStripConfig(customEv.detail);
+      } else {
+        setStripConfig(loadBannerBenefitsStripConfigSync());
+      }
+    };
+    window.addEventListener('rk-banner-benefits-updated', onStripUpdated);
+    return () => {
+      mounted = false;
+      window.removeEventListener('rk-banner-benefits-updated', onStripUpdated);
+    };
+  }, [bannerImagesVersion]);
 
   // Pause auto-scroll for 10 seconds upon user touch, swipe, or manual button click
   const pauseAutoScrollFor10Seconds = useCallback(() => {
@@ -209,12 +239,14 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
     touchEndXRef.current = null;
   };
 
-  // Determine whether this slide has a single lazy-loaded image or is skipped (coloured background only)
+  // Determine whether this slide has a single lazy-loaded image or default illustrated banner
   const slideImageSrc =
     !currentEvent.skipBannerImage && currentEvent.hasBannerImage
       ? loadedSlideImages[currentEvent.id]
       : !currentEvent.skipBannerImage && currentEvent.imageUrl
       ? currentEvent.imageUrl
+      : !currentEvent.skipBannerImage
+      ? '/banners/portal-benefits-banner.svg'
       : '';
 
   const bgGradient = SLIDE_BG_PALETTES[activeIndex % SLIDE_BG_PALETTES.length];
@@ -222,6 +254,29 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
   const bannerWhatsAppUrl = `https://wa.me/923270019099?text=${encodeURIComponent(
     `السلام علیکم! رتہ کلاں پورٹل پر خبر/بینر "${currentEvent.title}" کے حوالے سے معلومات چاہییں۔`
   )}`;
+
+  const visibleBenefitPairs = (
+    stripConfig?.pairs && stripConfig.pairs.length > 0
+      ? stripConfig.pairs
+      : DEFAULT_BANNER_BENEFIT_PAIRS
+  ).filter((p) => !p.isHidden);
+
+  const currentBenefitPair =
+    !stripConfig?.hideAll && visibleBenefitPairs.length > 0
+      ? visibleBenefitPairs[activeIndex % visibleBenefitPairs.length]
+      : null;
+
+  const useLineText = currentBenefitPair
+    ? currentBenefitPair.useUrdu.trim().startsWith('استعمال:')
+      ? currentBenefitPair.useUrdu.trim()
+      : `استعمال: ${currentBenefitPair.useUrdu.trim()}`
+    : '';
+
+  const benefitLineText = currentBenefitPair
+    ? currentBenefitPair.benefitUrdu.trim().startsWith('فائدہ:')
+      ? currentBenefitPair.benefitUrdu.trim()
+      : `فائدہ: ${currentBenefitPair.benefitUrdu.trim()}`
+    : '';
 
   return (
     <div
@@ -233,17 +288,61 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
     >
       <div
         onClick={() => onOpenDetails(currentEvent)}
-        className={`cursor-pointer bg-gradient-to-r ${bgGradient} text-white rounded-3xl p-3.5 sm:p-4 shadow-md border-2 border-amber-400/80 relative overflow-hidden transition active:scale-[0.99] min-w-[280px]`}
+        className={`cursor-pointer bg-gradient-to-r ${bgGradient} text-white rounded-3xl p-3 sm:p-4 shadow-xl border-2 border-amber-400/90 relative overflow-hidden transition active:scale-[0.99] min-w-[280px]`}
       >
-        {/* Single Lazy-Loaded Image per Slide (only if Admin set an image and did not choose Skip) */}
+        {/* Quick Step-by-Step Selector Pills on Main Banner */}
+        {safeEvents.length > 1 && (
+          <div
+            className="flex items-center gap-1.5 overflow-x-auto pb-2.5 mb-2 border-b border-white/15 scrollbar-none relative z-10"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="text-[10px] font-bold text-amber-300 shrink-0 font-nastaliq">
+              بینر گائیڈ (ترتیب سے):
+            </span>
+            {safeEvents.slice(0, 5).map((ev, idx) => {
+              const isSelected = idx === activeIndex;
+              const shortLabel =
+                idx === 0
+                  ? '1. پورٹل کے فوائد'
+                  : idx === 1
+                  ? '2. استعمال کا طریقہ'
+                  : idx === 2
+                  ? '3. بول کر پوچھیں'
+                  : idx === 3
+                  ? '4. ہسپتال و مساجد'
+                  : `5. خبر (${idx + 1})`;
+              return (
+                <button
+                  key={ev.id || idx}
+                  type="button"
+                  onClick={() => {
+                    pauseAutoScrollFor10Seconds();
+                    stopSpeaking();
+                    setIsPlayingAudio(false);
+                    setCurrentIndex(idx);
+                  }}
+                  className={`px-2.5 py-1 rounded-xl text-[11px] font-bold whitespace-nowrap transition cursor-pointer font-nastaliq ${
+                    isSelected
+                      ? 'bg-amber-400 text-stone-950 shadow'
+                      : 'bg-white/15 hover:bg-white/25 text-white border border-white/20'
+                  }`}
+                >
+                  {shortLabel}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Illustrated Banner Image per Slide */}
         {slideImageSrc && (
-          <div className="mb-3 relative rounded-2xl overflow-hidden border border-amber-400/60 shadow-inner max-h-44 bg-black/40">
+          <div className="mb-3 relative rounded-2xl overflow-hidden border-2 border-amber-400/70 shadow-lg bg-stone-950/80">
             <img
               src={slideImageSrc}
               alt={currentEvent.title}
               loading="lazy"
               decoding="async"
-              className="w-full h-36 sm:h-44 object-cover"
+              className="w-full h-36 sm:h-48 object-cover"
             />
           </div>
         )}
@@ -257,7 +356,7 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
               {getEventIcon(currentEvent.category)}
             </span>
             <span className="text-[11px] font-bold text-amber-300 bg-black/40 px-2.5 py-0.5 rounded-full border border-amber-400/30">
-              رتہ کلاں اہم خبر و واقعہ ({activeIndex + 1}/{safeEvents.length})
+              رتہ کلاں فوائد، طریقہ کار و خبریں ({activeIndex + 1}/{safeEvents.length})
             </span>
           </div>
 
@@ -266,18 +365,24 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
             <button
               type="button"
               onClick={handleToggleVoice}
-              className={`p-2 rounded-xl text-xs font-bold transition shadow cursor-pointer ${
+              className={`px-2.5 py-1.5 rounded-xl text-xs font-bold transition shadow cursor-pointer flex items-center gap-1 ${
                 isPlayingAudio
                   ? 'bg-red-600 text-white animate-voice-pulse'
-                  : 'bg-white/20 hover:bg-white/30 text-white'
+                  : 'bg-amber-400 hover:bg-amber-300 text-stone-950'
               }`}
               title="آواز میں سنیں"
               aria-label="آواز میں سنیں"
             >
               {isPlayingAudio ? (
-                <VolumeX className="w-4 h-4" />
+                <>
+                  <VolumeX className="w-4 h-4" />
+                  <span className="font-nastaliq text-[11px]">بند کریں</span>
+                </>
               ) : (
-                <Volume2 className="w-4 h-4" />
+                <>
+                  <Volume2 className="w-4 h-4" />
+                  <span className="font-nastaliq text-[11px]">سنیں 🔊</span>
+                </>
               )}
             </button>
 
@@ -305,14 +410,29 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
         </div>
 
         {/* Slide Urdu Title (Readable at 360px width) */}
-        <h4 className="font-bold text-base sm:text-lg font-nastaliq leading-snug text-white mb-1.5 break-words">
+        <h4 className="font-bold text-base sm:text-lg font-nastaliq leading-snug text-amber-200 mb-2 break-words">
           {currentEvent.title}
         </h4>
 
-        {/* Slide Urdu Content */}
-        <p className="text-xs sm:text-sm text-stone-100 line-clamp-2 leading-relaxed mb-2.5 font-medium break-words">
+        {/* Slide Urdu Content — Ordered Step-by-Step Sequence */}
+        <div className="text-xs sm:text-sm text-stone-100 whitespace-pre-line leading-relaxed mb-2.5 font-medium break-words bg-black/25 p-2.5 sm:p-3 rounded-2xl border border-white/15">
           {currentEvent.content}
-        </p>
+        </div>
+
+        {/* PART A: Real-text semi-transparent dark green rounded strip at the bottom of every slide */}
+        {currentBenefitPair && (
+          <div
+            aria-label="پورٹل کا استعمال اور فائدہ"
+            className="mb-2.5 bg-emerald-950/90 backdrop-blur-xs border border-emerald-400/60 rounded-2xl px-3 py-2 shadow-md pointer-events-none select-none space-y-1"
+          >
+            <p className="text-xs sm:text-sm font-bold text-amber-200 font-nastaliq leading-[1.9] break-words">
+              {useLineText}
+            </p>
+            <p className="text-xs sm:text-sm font-bold text-emerald-200 font-nastaliq leading-[1.9] break-words">
+              {benefitLineText}
+            </p>
+          </div>
+        )}
 
         {/* Footer row: Date, Location, WhatsApp & Details */}
         <div className="flex items-center justify-between text-[11px] text-amber-200/90 pt-2 border-t border-white/15 flex-wrap gap-2">
@@ -343,8 +463,8 @@ export const VillageEventsBanner: React.FC<VillageEventsBannerProps> = ({
               <span>واٹس ایپ</span>
             </a>
 
-            <span className="text-[11px] font-bold text-white bg-amber-500/30 hover:bg-amber-500/50 px-2.5 py-1 rounded-xl flex items-center gap-1">
-              <span>تفصیل</span>
+            <span className="text-[11px] font-bold text-stone-950 bg-amber-400 hover:bg-amber-300 px-3 py-1 rounded-xl flex items-center gap-1 shadow">
+              <span>مکمل گائیڈ و پاپ اپ کھولیں</span>
               <ExternalLink className="w-3 h-3" />
             </span>
           </div>

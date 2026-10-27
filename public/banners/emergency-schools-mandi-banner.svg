@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="800" height="360">
+  <defs>
+    <linearGradient id="bg4" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#064e3b" />
+      <stop offset="50%" stop-color="#115e59" />
+      <stop offset="100%" stop-color="#1e293b" />
+    </linearGradient>
+  </defs>
+  <rect width="800" height="360" rx="24" fill="url(#bg4)" />
+  <rect x="18" y="18" width="764" height="324" rx="20" fill="none" stroke="#34d399" stroke-width="3" opacity="0.85" />
+
+  <!-- Top Header Pill -->
+  <rect x="190" y="28" width="420" height="38" rx="19" fill="#022c22" stroke="#34d399" stroke-width="1.5" />
+  <text x="400" y="53" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="18" font-weight="bold" fill="#6ee7b7" text-anchor="middle">
+    🏥 خبریں، ہنگامی نمبر اور مفت اسکول (سلائیڈ 4)
+  </text>
+
+  <!-- Main Pair 4 Card -->
+  <rect x="44" y="84" width="712" height="172" rx="20" fill="#022c22" stroke="#34d399" stroke-width="2" opacity="0.95" />
+  <text x="728" y="140" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="23" font-weight="bold" fill="#fef08a" text-anchor="end">
+    استعمال: خبریں، ہنگامی نمبر اور مفت آن لائن اسکول۔
+  </text>
+  <text x="728" y="208" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="23" font-weight="bold" fill="#a7f3d0" text-anchor="end">
+    فائدہ: پورا پورٹل بالکل مفت ہے۔
+  </text>
+
+  <!-- Bottom Strip -->
+  <rect x="44" y="274" width="712" height="48" rx="14" fill="#f59e0b" />
+  <text x="400" y="305" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="17" font-weight="bold" fill="#022c22" text-anchor="middle">
+    🚑 ریسکیو 1122  •  🩸 بلڈ ڈونرز  •  🎒 مفت آن لائن اسکول  •  🌾 غلہ منڈی ریٹ
+  </text>
+</svg>

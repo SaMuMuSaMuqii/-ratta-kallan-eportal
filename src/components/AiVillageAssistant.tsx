@@ -301,10 +301,10 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
         onSearch(q);
       }
       speakText(
-        `آپ نے پوچھا: ${q}۔ رتہ کلاں پورٹل میں تلاش کیا جا رہا ہے۔`,
+        `آپ نے پوچھا: ${q}۔ میں ابھی رتہ کلاں پورٹل میں ڈھونڈتا ہوں اور آپ کو بتاتا ہوں۔`,
         lang,
         undefined,
-        { rate: getSpeechRate(), pitch: 1.0 }
+        { isFemaleVillageVoice: false, voiceGender: 'male', rate: getSpeechRate(), pitch: 0.82 }
       );
     }
   };
@@ -431,7 +431,7 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
                   </p>
                 ) : (
                   <p className="text-xs text-emerald-200/90 font-nastaliq">
-                    نیچے کسی بھی بٹن کو دبائیں، رتہ کلاں مددگار آپ کو مکمل تفصیلات بول کر سنائے گا۔
+                    نیچے کسی بھی بٹن کو دبائیں، میں آپ کو مکمل تفصیلات بول کر بتاتا ہوں۔
                   </p>
                 )}
               </div>
@@ -469,7 +469,7 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
                   {isListeningMic ? (
                     <>
                       <MicOff className="w-3.5 h-3.5 text-white" />
-                      <span>سن رہے ہیں...</span>
+                      <span>سن رہا ہوں...</span>
                     </>
                   ) : (
                     <>
@@ -481,7 +481,7 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
               </div>
             </div>
 
-            {/* Expandable Voice Settings Drawer */}
+            {/* Expandable Voice Settings Drawer (Part D3: includes "آواز سنیں" test button) */}
             {showSettings && (
               <div className="bg-emerald-900/50 border border-emerald-600/60 p-3 rounded-2xl space-y-2.5 animate-in fade-in duration-150">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -489,14 +489,14 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
                   <div className="flex items-center gap-1 text-xs font-nastaliq flex-wrap">
                     <span className="text-amber-200 font-bold ml-1">رفتار بول چال:</span>
                     {[
-                      { label: '0.85x آرام سے', val: 0.85 },
-                      { label: '0.95x عام بول چال ⭐', val: 0.95 },
-                      { label: '1.1x تھوڑا تیز', val: 1.1 },
+                      { label: '0.90x آرام سے', val: 0.9 },
+                      { label: '1.02x مستعد مردانہ آواز ⭐', val: 1.02 },
+                      { label: '1.12x تیز', val: 1.12 },
                     ].map((s) => (
                       <button
                         key={s.val}
                         onClick={() => handleChangeSpeed(s.val)}
-                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition ${
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold transition cursor-pointer ${
                           Math.abs(speed - s.val) < 0.05
                             ? 'bg-amber-400 text-stone-950 shadow'
                             : 'bg-black/30 text-stone-300 hover:text-white'
@@ -507,9 +507,19 @@ export const AiVillageAssistant: React.FC<AiVillageAssistantProps> = ({
                     ))}
                   </div>
 
-                  <span className="text-[11px] text-emerald-200 font-nastaliq">
-                    فون کی ڈیفالٹ آواز سے صوتی جواب
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={handleTestVoice}
+                      className="px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold text-xs flex items-center gap-1.5 shadow cursor-pointer"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>آواز سنیں</span>
+                    </button>
+                    <span className="text-[11px] text-emerald-200 font-nastaliq">
+                      پاکستانی مردانہ آواز (Pitch 0.82)
+                    </span>
+                  </div>
                 </div>
               </div>
             )}
