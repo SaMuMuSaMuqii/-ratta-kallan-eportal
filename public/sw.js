@@ -1,5 +1,5 @@
 // Service Worker for Ratta Kallan Digital Portal
-const CACHE_NAME = 'ratta-kallan-cache-v3';
+const CACHE_NAME = 'ratta-kallan-cache-v4';
 const OFFLINE_URLS = [
   '/',
   '/index.html',
