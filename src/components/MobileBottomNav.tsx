@@ -22,8 +22,8 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
   lang,
 }) => {
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-2xl safe-area-bottom">
-      <div className="max-w-md mx-auto px-1.5 py-2 flex items-center justify-around">
+    <div className="md:hidden fixed bottom-0 left-0 right-0 z-40 bg-white/95 backdrop-blur-md border-t border-stone-200 shadow-2xl safe-area-bottom">
+      <div className="max-w-lg mx-auto px-1.5 py-2 flex items-center justify-around">
         {/* Home Tab */}
         <button
           onClick={() => onSelectTab('home')}

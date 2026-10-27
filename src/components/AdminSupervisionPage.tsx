@@ -387,7 +387,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       const savedPassForEmail = getStoredEmailVerifier(cleanEmail);
       if (savedPassForEmail && savedPassForEmail !== enteredPass) {
         setLoginError(
-          'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" below.'
+          'Login failed. Please check your credentials and try again.'
         );
         setIsSigningIn(false);
         return;
@@ -396,7 +396,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
       // If user entered the Super Admin email with an incorrect password, reject immediately
       if (isAuthorizedSuperAdminResetEmail(cleanEmail)) {
         setLoginError(
-          'Invalid Password. If you forgot your password, click "Forgot Password?" or "Reset Password" below.'
+          'Login failed. Please check your credentials and try again.'
         );
         setIsSigningIn(false);
         return;
@@ -449,8 +449,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
         },
       };
       onAdminLoginSuccess(adminSession);
-    } catch (err: any) {
-      setLoginError(err.message || 'Sign in failed. Please check your credentials and try again.');
+    } catch {
+      setLoginError('Login failed. Please check your credentials and try again.');
     } finally {
       setIsSigningIn(false);
     }
@@ -485,7 +485,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
     setRoleMap(getLocalRolesCollection());
     setLoginError('');
     setLoginSuccessNotice(
-      'Admin role (admin: true) has been registered. Now enter your Password above and click "Sign In".'
+      'Administrator access has been verified. Please enter your Password above and click "Sign In".'
     );
   };
 
@@ -963,10 +963,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             Access Denied
           </h1>
           <p className="text-sm text-red-100/90 leading-relaxed">
-            This supervision console is restricted to authorized administrators with{' '}
-            <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">admin: true</code> in
-            the <code className="font-mono bg-black/40 px-1.5 py-0.5 rounded">roles</code>{' '}
-            collection.
+            You do not have permission to access this page. This supervision console is restricted to authorized administrators only.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
             <button
@@ -1007,7 +1004,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               </div>
               <div>
                 <h1 className="text-xl font-bold text-amber-300">Admin Sign In & Password Reset</h1>
-                <p className="text-xs text-stone-300">Ratta Kallan e-Portal — Supervision Console (#admin)</p>
+                <p className="text-xs text-stone-300">Ratta Kallan e-Portal — Supervision Console</p>
               </div>
             </div>
             <button
@@ -1022,7 +1019,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
 
           <form onSubmit={handleAdminSignIn} className="p-5 sm:p-6 space-y-4" noValidate>
             <div className="bg-stone-950/90 border border-stone-700 rounded-2xl p-3.5 text-xs text-stone-300 leading-relaxed">
-              Sign in with your authorized Admin <strong className="text-amber-300">Email Address</strong> and <strong className="text-amber-300">Password</strong>. Only accounts with <code className="font-mono text-emerald-300">admin: true</code> in the Firestore <code className="font-mono text-emerald-300">roles</code> collection are permitted.
+              Sign in with your authorized Admin <strong className="text-amber-300">Email Address</strong> and <strong className="text-amber-300">Password</strong> to access the portal supervision console.
             </div>
 
             {loginError && (
@@ -1115,60 +1112,10 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               </button>
             </div>
 
-            <div className="pt-3 border-t border-stone-800">
-              <button
-                type="button"
-                onClick={() => setShowConsoleGuide((v) => !v)}
-                className="w-full py-2.5 px-3 bg-stone-800/80 hover:bg-stone-800 text-amber-300 rounded-xl text-xs font-bold flex items-center justify-between cursor-pointer"
-              >
-                <span>Firebase Console Role Setup Guide (`roles`)</span>
-                <span>{showConsoleGuide ? '▲' : '▼'}</span>
-              </button>
-
-              {showConsoleGuide && (
-                <div className="mt-3 p-4 bg-stone-950 border border-emerald-700/70 rounded-2xl text-xs space-y-2.5 leading-relaxed text-stone-200">
-                  <p className="font-bold text-emerald-300">
-                    Steps to configure an Admin user in Firebase Console:
-                  </p>
-                  <ul className="list-decimal list-inside space-y-1">
-                    <li>
-                      Open <strong>Authentication</strong>, create a user with your Email Address and Password, and copy the <strong>User UID</strong>.
-                    </li>
-                    <li>
-                      Open <strong>Firestore Database</strong> and click <strong>Start collection</strong>.
-                    </li>
-                    <li>
-                      Enter the collection ID: <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">roles</code>
-                    </li>
-                    <li>
-                      Paste your copied <strong>User UID</strong> into the <strong>Document ID</strong> field.
-                    </li>
-                    <li>
-                      Add a boolean field named <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">admin</code> with value <code className="font-mono bg-emerald-950 text-emerald-300 px-1.5 py-0.5 rounded">true</code> and save.
-                    </li>
-                  </ul>
-
-                  <div className="pt-2 border-t border-stone-800 space-y-2">
-                    <p className="text-[11px] text-amber-200">
-                      To activate <code className="font-mono">admin: true</code> for the authorized Super Admin email above:
-                    </p>
-                    <input
-                      type="text"
-                      value={bootstrapUid}
-                      onChange={(e) => setBootstrapUid(e.target.value)}
-                      placeholder="Optional: Enter Firebase UID (auto-generated if left blank)"
-                      className="w-full px-3 py-2 bg-stone-900 border border-stone-700 rounded-xl text-xs font-mono text-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleBootstrapAdminRoleInConsoleMirror}
-                      className="w-full py-2.5 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold cursor-pointer"
-                    >
-                      Register Admin Role for Email Address
-                    </button>
-                  </div>
-                </div>
-              )}
+            <div className="pt-2 border-t border-stone-800 text-center">
+              <p className="text-[11px] text-stone-400">
+                Protected by Ratta Kallan e-Portal Administrator Security. Unauthorized access is prohibited.
+              </p>
             </div>
           </form>
         </div>
@@ -1208,8 +1155,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                 <h1 className="text-lg sm:text-xl font-bold text-amber-300">
                   رتہ کلاں ایڈمن نگرانی ڈیش بورڈ
                 </h1>
-                <span className="text-[11px] bg-emerald-600 text-white px-2 py-0.5 rounded-full font-sans font-bold">
-                  roles.admin = true
+                <span className="text-[11px] bg-emerald-600 text-white px-2.5 py-0.5 rounded-full font-sans font-bold">
+                  Verified Admin
                 </span>
               </div>
               <p className="text-xs text-stone-300 font-sans">
@@ -1823,10 +1770,10 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-stone-800 pb-2.5">
                     <div>
                       <h4 className="text-sm sm:text-base font-bold text-emerald-300">
-                        🌿 ہر بینر سلائیڈ پر "استعمال:" اور "فائدہ:" پٹی (settings/bannerBenefitsStrip)
+                        🌿 ہر بینر سلائیڈ پر "استعمال:" اور "فائدہ:" پٹی
                       </h4>
                       <p className="text-[11px] text-stone-400">
-                        یہ دو سطریں ہر بینر سلائیڈ کے نیچے گہرے سبز باکس میں باری باری نظر آتی ہیں (تصویر کے اندر نہیں تاکہ 80 KB حد متاثر نہ ہو)۔
+                        یہ دو سطریں ہر بینر سلائیڈ کے نیچے گہرے سبز باکس میں باری باری نظر آتی ہیں۔
                       </p>
                     </div>
                     <div className="flex items-center gap-2">
@@ -1969,8 +1916,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                       <span className="text-[11px] text-amber-300 block">
                         بینر حالت:{' '}
                         {ev.hasBannerImage && !ev.skipBannerImage
-                          ? 'تصویر لگی ہے (< 80 KB)'
-                          : 'بغیر تصویر (Skip — رنگین پس منظر)'}
+                          ? 'تصویر لگی ہے'
+                          : 'بغیر تصویر (رنگین پس منظر)'}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-2">
@@ -2539,10 +2486,10 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
           <div className="space-y-6">
             <div className="bg-stone-900 border-2 border-emerald-600 rounded-3xl p-5 space-y-4">
               <h3 className="text-lg font-bold text-emerald-300">
-                👥 ذمہ داریاں (Roles) دیں یا ہٹائیں + دوسرا قابلِ اعتماد ایڈمن (Second Trusted Admin)
+                👥 ذمہ داریاں دیں یا ہٹائیں + دوسرا قابلِ اعتماد ایڈمن
               </h3>
               <p className="text-xs text-stone-300 leading-loose">
-                یہاں آپ ای میل کے ذریعے کسی ذمہ دار کو مخصوص سیکشن کا رول (<code className="font-mono">alertManager</code>, <code className="font-mono">mosqueEditor</code>, <code className="font-mono">schoolEditor</code>, <code className="font-mono">hospitalEditor</code>, <code className="font-mono">transportEditor</code>) یا <strong>دوسرا قابلِ اعتماد ایڈمن (Backup Admin)</strong> مقرر کر سکتے ہیں تاکہ ایک اکاؤنٹ گم ہونے پر پورٹل بند نہ ہو۔ یہاں کبھی کسی کا پاس ورڈ نہیں دکھایا جاتا۔
+                یہاں آپ ای میل کے ذریعے کسی ذمہ دار کو مخصوص سیکشن (مسجد، سکول، ہسپتال، ٹرانسپورٹ، الرٹ) یا <strong>دوسرا قابلِ اعتماد ایڈمن (Backup Admin)</strong> مقرر کر سکتے ہیں تاکہ ایک اکاؤنٹ گم ہونے پر پورٹل بند نہ ہو۔ یہاں کبھی کسی کا پاس ورڈ نہیں دکھایا جاتا۔
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2557,7 +2504,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   type="text"
                   value={roleUidInput}
                   onChange={(e) => setRoleUidInput(e.target.value)}
-                  placeholder="Firebase UID (اختیاری)"
+                  placeholder="حوالہ کوڈ (اختیاری)"
                   className="min-h-[46px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs font-mono text-white"
                 />
                 <input
@@ -2575,12 +2522,12 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   onChange={(e) => setSelectedRoleToToggle(e.target.value as PortalRoleKey)}
                   className="min-h-[46px] px-3.5 bg-stone-950 border border-stone-700 rounded-xl text-xs text-white"
                 >
-                  <option value="mosqueEditor">مسجد ایڈیٹر (mosqueEditor)</option>
-                  <option value="schoolEditor">سکول ایڈیٹر (schoolEditor)</option>
-                  <option value="hospitalEditor">ہسپتال ایڈیٹر (hospitalEditor)</option>
-                  <option value="transportEditor">ٹرانسپورٹ ایڈیٹر (transportEditor)</option>
-                  <option value="alertManager">الّرٹ مینیجر (alertManager)</option>
-                  <option value="admin">دوسرا قابلِ اعتماد ایڈمن (Second Trusted Admin - admin:true)</option>
+                  <option value="mosqueEditor">مسجد ایڈیٹر</option>
+                  <option value="schoolEditor">سکول ایڈیٹر</option>
+                  <option value="hospitalEditor">ہسپتال ایڈیٹر</option>
+                  <option value="transportEditor">ٹرانسپورٹ ایڈیٹر</option>
+                  <option value="alertManager">الرٹ مینیجر</option>
+                  <option value="admin">دوسرا قابلِ اعتماد ایڈمن (Backup Admin)</option>
                 </select>
 
                 <label className="flex items-center gap-2 text-xs text-amber-300 cursor-pointer">
@@ -2646,7 +2593,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             {/* Active Role Documents List */}
             <div className="space-y-3">
               <h4 className="text-base font-bold text-amber-300">
-                موجودہ رولز اور ذمہ داران (`roles` کلیکشن)
+                موجودہ ذمہ داران کی فہرست
               </h4>
               {Object.values(
                 Object.values(roleMap).reduce((acc, docItem) => {
@@ -2661,45 +2608,44 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center gap-2 flex-wrap">
                       <strong className="text-sm text-white">{rDoc.name || 'ذمہ دار'}</strong>
-                      <span className="text-xs font-sans text-emerald-300 bg-stone-950 px-2 py-0.5 rounded">
+                      <span className="text-xs font-sans text-emerald-300 bg-stone-950 px-2 py-0.5 rounded ltr-inline">
                         {rDoc.email}
                       </span>
-                      <span className="text-[11px] font-mono text-stone-400">UID: {rDoc.uid}</span>
                     </div>
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {rDoc.admin && (
-                        <span className="text-[11px] bg-amber-400 text-stone-950 px-2 py-0.5 rounded-full font-bold">
-                          admin: true {rDoc.isTrustedBackupAdmin ? '(دوسرا قابلِ اعتماد ایڈمن)' : ''}
+                        <span className="text-[11px] bg-amber-400 text-stone-950 px-2.5 py-0.5 rounded-full font-bold">
+                          سپر ایڈمن {rDoc.isTrustedBackupAdmin ? '(ثانوی ایڈمن)' : ''}
                         </span>
                       )}
                       {rDoc.alertManager && (
-                        <span className="text-[11px] bg-red-900 text-red-200 px-2 py-0.5 rounded-full">
-                          alertManager
+                        <span className="text-[11px] bg-red-900 text-red-200 px-2.5 py-0.5 rounded-full">
+                          الرٹ مینیجر
                         </span>
                       )}
                       {rDoc.mosqueEditor && (
-                        <span className="text-[11px] bg-emerald-900 text-emerald-200 px-2 py-0.5 rounded-full">
-                          mosqueEditor
+                        <span className="text-[11px] bg-emerald-900 text-emerald-200 px-2.5 py-0.5 rounded-full">
+                          مسجد ایڈیٹر
                         </span>
                       )}
                       {rDoc.schoolEditor && (
-                        <span className="text-[11px] bg-sky-900 text-sky-200 px-2 py-0.5 rounded-full">
-                          schoolEditor
+                        <span className="text-[11px] bg-sky-900 text-sky-200 px-2.5 py-0.5 rounded-full">
+                          سکول ایڈیٹر
                         </span>
                       )}
                       {rDoc.hospitalEditor && (
-                        <span className="text-[11px] bg-purple-900 text-purple-200 px-2 py-0.5 rounded-full">
-                          hospitalEditor
+                        <span className="text-[11px] bg-purple-900 text-purple-200 px-2.5 py-0.5 rounded-full">
+                          ہسپتال ایڈیٹر
                         </span>
                       )}
                       {rDoc.transportEditor && (
-                        <span className="text-[11px] bg-amber-900 text-amber-200 px-2 py-0.5 rounded-full">
-                          transportEditor
+                        <span className="text-[11px] bg-amber-900 text-amber-200 px-2.5 py-0.5 rounded-full">
+                          ٹرانسپورٹ ایڈیٹر
                         </span>
                       )}
                       {rDoc.disabled && (
-                        <span className="text-[11px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold">
-                          اکاؤنٹ معطل (Disabled)
+                        <span className="text-[11px] bg-red-600 text-white px-2.5 py-0.5 rounded-full font-bold">
+                          اکاؤنٹ معطل
                         </span>
                       )}
                     </div>

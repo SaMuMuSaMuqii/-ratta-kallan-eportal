@@ -127,12 +127,12 @@ export const PORTAL_FEATURES_INDEX: PortalFeatureSearchItem[] = [
     id: 'portal-action-admin',
     actionType: 'open_admin_supervision',
     secondaryActionType: 'open_admin_panel',
-    titleUrdu: '🔐 ایڈمن پینل اور سپر ایڈمن کنٹرول ڈیش بورڈ (#admin)',
+    titleUrdu: '🔐 ایڈمن پینل اور سپر ایڈمن کنٹرول ڈیش بورڈ',
     titleEn: 'Admin Panel & Super Admin Supervision Dashboard',
     descriptionUrdu:
       'ایڈمن اپنی ای میل اور پاس ورڈ سے لاگ ان کریں، اپنا پاس ورڈ تبدیل کریں، پروفائلز، بینر تصاویر، خبریں، منڈی ریٹس، شیلٹرز، الرٹس اور رولز کنٹرول کریں۔',
     badgeUrdu: 'ایڈمن کنٹرول پینل',
-    buttonLabelUrdu: 'سپر ایڈمن ڈیش بورڈ کھولیں (#admin)',
+    buttonLabelUrdu: 'سپر ایڈمن ڈیش بورڈ کھولیں',
     secondaryButtonLabelUrdu: 'ایڈمن پینل کھولیں',
     keywords: [
       'admin',
@@ -646,7 +646,13 @@ export function expandSynonyms(word: string): string[] {
 
   for (const cluster of SYNONYM_CLUSTERS) {
     const normCluster = cluster.map(normalizeSearchString);
-    if (normCluster.some((item) => item.includes(norm) || norm.includes(item))) {
+    const hasMatch = normCluster.some((item) => {
+      if (!item) return false;
+      if (item === norm) return true;
+      const itemWords = item.split(/\s+/);
+      return itemWords.includes(norm);
+    });
+    if (hasMatch) {
       normCluster.forEach((term) => expansions.add(term));
     }
   }
@@ -686,14 +692,28 @@ export function calculateMatchScore(
   const normLoc = normalizeSearchString(targets.location);
   const cleanPhone = (targets.phoneDigits || '').replace(/\D/g, '');
 
+  const hasWordOrPhrase = (fieldText: string, term: string): boolean => {
+    if (!fieldText || !term) return false;
+    if (fieldText === term) return true;
+    if (term.includes(' ')) {
+      return ` ${fieldText} `.includes(` ${term} `);
+    }
+    const words = fieldText.split(/\s+/);
+    if (words.includes(term)) return true;
+    if (term.length >= 4) {
+      return words.some((w) => w.startsWith(term) || (w.length >= 4 && term.startsWith(w)));
+    }
+    return false;
+  };
+
   let totalScore = 0;
 
   // 1. Exact full query phrase match
-  if (normName.includes(normQuery)) totalScore += 120;
-  if (normBiz.includes(normQuery)) totalScore += 90;
-  if (normCategory.includes(normQuery)) totalScore += 80;
-  if (normServices.includes(normQuery)) totalScore += 65;
-  if (normLoc.includes(normQuery)) totalScore += 40;
+  if (hasWordOrPhrase(normName, normQuery)) totalScore += 120;
+  if (hasWordOrPhrase(normBiz, normQuery)) totalScore += 90;
+  if (hasWordOrPhrase(normCategory, normQuery)) totalScore += 80;
+  if (hasWordOrPhrase(normServices, normQuery)) totalScore += 65;
+  if (hasWordOrPhrase(normLoc, normQuery)) totalScore += 40;
 
   // Phone number match (query is at least 3 digits, e.g. 1122 or 0300)
   const queryDigits = normQuery.replace(/\D/g, '');
@@ -709,23 +729,23 @@ export function calculateMatchScore(
     let wordMatched = false;
 
     for (const syn of wordSynonyms) {
-      if (normName.includes(syn)) {
+      if (hasWordOrPhrase(normName, syn)) {
         totalScore += syn === word ? 40 : 25;
         wordMatched = true;
       }
-      if (normBiz.includes(syn)) {
+      if (hasWordOrPhrase(normBiz, syn)) {
         totalScore += syn === word ? 35 : 20;
         wordMatched = true;
       }
-      if (normCategory.includes(syn)) {
+      if (hasWordOrPhrase(normCategory, syn)) {
         totalScore += syn === word ? 30 : 18;
         wordMatched = true;
       }
-      if (normServices.includes(syn)) {
+      if (hasWordOrPhrase(normServices, syn)) {
         totalScore += syn === word ? 25 : 15;
         wordMatched = true;
       }
-      if (normLoc.includes(syn)) {
+      if (hasWordOrPhrase(normLoc, syn)) {
         totalScore += syn === word ? 15 : 10;
         wordMatched = true;
       }
@@ -827,10 +847,15 @@ export function performUniversalSearch({
 
   // 0. Search Portal Features, Pages & Control Panels (e.g., Admin Panel, Login, Register, AI School, Route Planner)
   if (normQuery && categoryFilter === 'all') {
+    const queryWords = normQuery.split(/\s+/).filter(Boolean);
     PORTAL_FEATURES_INDEX.forEach((feat) => {
       const exactKeywordHit = feat.keywords.some((kw) => {
         const normKw = normalizeSearchString(kw);
-        return normKw && (normQuery === normKw || normQuery.includes(normKw));
+        if (!normKw) return false;
+        if (normKw.includes(' ')) {
+          return normQuery.includes(normKw);
+        }
+        return queryWords.includes(normKw);
       });
       const baseScore = calculateMatchScore(
         {
@@ -845,7 +870,7 @@ export function performUniversalSearch({
       );
       const score = exactKeywordHit ? Math.max(baseScore + 250, 320) : baseScore;
 
-      if (score >= Math.max(minScoreThreshold, 25)) {
+      if (exactKeywordHit || score >= Math.max(minScoreThreshold, 45)) {
         results.push({
           id: feat.id,
           type: 'portal_action',

@@ -2003,7 +2003,7 @@ export default function App() {
     return (
       <div
         key={profile.id}
-        className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden flex flex-col relative"
+        className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden flex flex-col justify-between h-full relative"
       >
         {/* Card Media Header */}
         <div className="relative h-36 bg-stone-900 overflow-hidden">
@@ -2081,7 +2081,7 @@ export default function App() {
         </div>
 
         {/* Content */}
-        <div className="p-3.5 space-y-2.5">
+        <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
           {/* Business Dedicated Operating Hours, Break & Live Status Badge */}
           <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
             <div className="flex items-center justify-between gap-1 flex-wrap">
@@ -2451,7 +2451,7 @@ export default function App() {
 
       {/* Clean, Polished Top Header with Embedded Universal Search Bar */}
       <header className="sticky top-0 z-30 bg-gradient-to-r from-emerald-950 via-teal-950 to-stone-950 text-white shadow-xl border-b border-emerald-800/80">
-        <div className="max-w-md mx-auto sm:max-w-4xl px-3 py-2.5 space-y-2">
+        <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 space-y-2">
           {/* Top Brand & Utility Row (Cleaned & De-cluttered) */}
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -2599,7 +2599,7 @@ export default function App() {
                 placeholder={
                   isVoiceSearching
                     ? 'سن رہے ہیں... بولیں (Listening...)'
-                    : 'کچھ بھی تلاش کریں: admin، ڈاکٹر، سکول، مسجد، گاڑی، منڈی ریٹ، نام...'
+                    : 'کچھ بھی تلاش کریں: ڈاکٹر، سکول، مسجد، گاڑی، منڈی ریٹ، نام...'
                 }
                 className="flex-1 text-stone-900 text-xs sm:text-sm font-semibold focus:outline-none bg-transparent placeholder:text-stone-400 font-nastaliq min-w-0"
               />
@@ -2676,8 +2676,8 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Container - Focused for Mobile Experience */}
-      <div className="max-w-md sm:max-w-3xl mx-auto w-full px-3 pt-3 flex-1 flex flex-col relative z-10">
+      {/* Main Container - Responsive Across Mobile (320px+), Tablet & Desktop */}
+      <div className="max-w-7xl mx-auto w-full px-3 sm:px-6 pt-3 flex-1 flex flex-col relative z-10">
         {/* ========================================================================= */}
         {/* CONDITIONAL RENDERING: STRICT SEARCH ISOLATION VS NORMAL HOME VIEW */}
         {/* ========================================================================= */}
@@ -2965,7 +2965,9 @@ export default function App() {
                   <span>مطلوبہ ہنر مند، دکانیں و کاریگر ({filteredProfiles.length})</span>
                   <span className="text-stone-500">رتہ کلاں</span>
                 </div>
-                {filteredProfiles.map((p) => renderProfileCard(p))}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
+                  {filteredProfiles.map((p) => renderProfileCard(p))}
+                </div>
               </div>
             )}
 
@@ -2976,7 +2978,9 @@ export default function App() {
                   <span>مطلوبہ طبی خدمات و ہسپتال ({filteredHospitals.length})</span>
                   <span className="text-red-600 font-bold animate-pulse">24/7 الرٹ</span>
                 </div>
-                {filteredHospitals.map((hosp) => renderHospitalCard(hosp))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {filteredHospitals.map((hosp) => renderHospitalCard(hosp))}
+                </div>
               </div>
             )}
 
@@ -2987,7 +2991,9 @@ export default function App() {
                   <span>مطلوبہ مساجد و نماز کے اوقات ({filteredMosques.length})</span>
                   <span className="text-stone-500">رتہ کلاں</span>
                 </div>
-                {filteredMosques.map((m) => renderMosqueCard(m))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {filteredMosques.map((m) => renderMosqueCard(m))}
+                </div>
               </div>
             )}
 
@@ -2998,7 +3004,9 @@ export default function App() {
                   <span>مطلوبہ اسکولز و تعلیمی ادارے ({filteredInstitutes.length})</span>
                   <span className="text-stone-500">رتہ کلاں</span>
                 </div>
-                {filteredInstitutes.map((inst) => renderInstituteCard(inst))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {filteredInstitutes.map((inst) => renderInstituteCard(inst))}
+                </div>
               </div>
             )}
 
@@ -3009,7 +3017,9 @@ export default function App() {
                   <span>مطلوبہ پبلک ٹرانسپورٹ و جھنگ گاڑیاں ({filteredTransports.length})</span>
                   <span className="text-stone-500">رتہ تا جھنگ</span>
                 </div>
-                {filteredTransports.map((veh) => renderTransportCard(veh))}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-stretch">
+                  {filteredTransports.map((veh) => renderTransportCard(veh))}
+                </div>
               </div>
             )}
 
@@ -3403,61 +3413,61 @@ export default function App() {
             </div>
 
             {/* Quick Services Buttons Row: Mosques, Schools, Transport, Hospitals, Management */}
-            <div className="grid grid-cols-5 gap-1 sm:gap-2 mb-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-3 text-xs">
               {/* Mosques & Prayer Timings */}
               <button
                 onClick={() => setIsMosquesModalOpen(true)}
-                className="p-1.5 sm:p-2.5 rounded-2xl bg-white border border-emerald-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-50 transition active:scale-95 cursor-pointer"
+                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-emerald-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-50 transition active:scale-95 cursor-pointer min-h-[76px]"
               >
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-emerald-100 flex items-center justify-center">
-                  <Compass className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-800" />
+                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <Compass className="w-4 h-4 text-emerald-800" />
                 </div>
-                <strong className="text-emerald-950 text-[9px] sm:text-[11px] font-nastaliq leading-tight">
+                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-tight">
                   مساجد ({mosques.length})
                 </strong>
-                <span className="text-[7px] sm:text-[9px] text-stone-500">اوقات</span>
+                <span className="text-[10px] sm:text-xs text-stone-500">اوقات</span>
               </button>
 
               {/* Schools & Colleges */}
               <button
                 onClick={() => setIsInstitutesModalOpen(true)}
-                className="p-1.5 sm:p-2.5 rounded-2xl bg-white border border-blue-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-blue-50 transition active:scale-95 cursor-pointer"
+                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-blue-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-blue-50 transition active:scale-95 cursor-pointer min-h-[76px]"
               >
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-blue-100 flex items-center justify-center">
-                  <GraduationCap className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-blue-800" />
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                  <GraduationCap className="w-4 h-4 text-blue-800" />
                 </div>
-                <strong className="text-blue-950 text-[9px] sm:text-[11px] font-nastaliq leading-tight">
+                <strong className="text-blue-950 text-xs sm:text-sm font-nastaliq leading-tight">
                   اسکولز ({institutes.length})
                 </strong>
-                <span className="text-[7px] sm:text-[9px] text-stone-500">ٹائم ٹیبل</span>
+                <span className="text-[10px] sm:text-xs text-stone-500">ٹائم ٹیبل</span>
               </button>
 
               {/* Public Transport & Vans to Jhang */}
               <button
                 onClick={() => setIsTransportModalOpen(true)}
-                className="p-1.5 sm:p-2.5 rounded-2xl bg-white border border-amber-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-amber-50 transition active:scale-95 cursor-pointer"
+                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-amber-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-amber-50 transition active:scale-95 cursor-pointer min-h-[76px]"
               >
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-amber-100 flex items-center justify-center">
-                  <Bus className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-800" />
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+                  <Bus className="w-4 h-4 text-amber-800" />
                 </div>
-                <strong className="text-amber-950 text-[9px] sm:text-[11px] font-nastaliq leading-tight">
+                <strong className="text-amber-950 text-xs sm:text-sm font-nastaliq leading-tight">
                   گاڑیاں ({transports.length})
                 </strong>
-                <span className="text-[7px] sm:text-[9px] text-stone-500">رتہ تا جھنگ</span>
+                <span className="text-[10px] sm:text-xs text-stone-500">رتہ تا جھنگ</span>
               </button>
 
               {/* Hospitals & Medical Emergency Button */}
               <button
                 onClick={() => setIsHospitalsModalOpen(true)}
-                className="p-1.5 sm:p-2.5 rounded-2xl bg-gradient-to-b from-red-50 to-rose-100 border-2 border-red-400 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-red-100 transition active:scale-95 cursor-pointer relative"
+                className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-b from-red-50 to-rose-100 border-2 border-red-400 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-red-100 transition active:scale-95 cursor-pointer relative min-h-[76px]"
               >
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs">
-                  <HeartPulse className="w-3.5 h-3.5 sm:w-4 sm:h-4 animate-pulse" />
+                <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs">
+                  <HeartPulse className="w-4 h-4 animate-pulse" />
                 </div>
-                <strong className="text-red-950 text-[9px] sm:text-[11px] font-nastaliq leading-tight">
+                <strong className="text-red-950 text-xs sm:text-sm font-nastaliq leading-tight">
                   ہسپتال ({hospitals.length})
                 </strong>
-                <span className="text-[7px] sm:text-[9px] text-red-700 font-bold animate-pulse">24/7 الرٹ</span>
+                <span className="text-[10px] sm:text-xs text-red-700 font-bold animate-pulse">24/7 الرٹ</span>
               </button>
 
               {/* Mosque & School Management Login */}
@@ -3467,15 +3477,15 @@ export default function App() {
                   setEditingEntityType('mosque');
                   setIsTimetableModalOpen(true);
                 }}
-                className="p-1.5 sm:p-2.5 rounded-2xl bg-emerald-900/10 border border-emerald-500/60 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-100/60 transition active:scale-95 cursor-pointer"
+                className="col-span-2 sm:col-span-2 md:col-span-1 p-2.5 sm:p-3 rounded-2xl bg-emerald-900/10 border border-emerald-500/60 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-100/60 transition active:scale-95 cursor-pointer min-h-[76px]"
               >
-                <div className="w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center">
-                  <Lock className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                <div className="w-8 h-8 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center">
+                  <Lock className="w-4 h-4" />
                 </div>
-                <strong className="text-emerald-950 text-[9px] sm:text-[11px] font-nastaliq leading-tight">
+                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-tight">
                   انتظامیہ لاگ ان
                 </strong>
-                <span className="text-[7px] sm:text-[9px] text-emerald-800 font-bold">امام و پرنسپل</span>
+                <span className="text-[10px] sm:text-xs text-emerald-800 font-bold">امام و پرنسپل</span>
               </button>
             </div>
 
@@ -3572,7 +3582,7 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div className="space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
                 {filteredProfiles.map((profile) => renderProfileCard(profile))}
               </div>
             )}
@@ -3740,7 +3750,7 @@ export default function App() {
                   className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5"
                 >
                   <ShieldCheck className="w-4 h-4" />
-                  <span>ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری (#admin)</span>
+                  <span>ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری</span>
                 </button>
                 <button
                   onClick={() => setIsAdminModalOpen(true)}
@@ -3878,7 +3888,7 @@ export default function App() {
         </footer>
       </div>
 
-      {/* Floating "بول کر پوچھیں" Microphone Button on Every Main Screen (>= 56 px) */}
+      {/* Floating "بول کر پوچھیں" Microphone Button on Every Main Screen */}
       <button
         type="button"
         onClick={() => {
@@ -3886,18 +3896,18 @@ export default function App() {
           setVoiceAskInitialQuestion('');
           setIsVoiceAskModalOpen(true);
         }}
-        className="fixed bottom-20 sm:bottom-6 left-3 sm:left-6 z-40 min-h-[56px] min-w-[56px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-4 py-3 rounded-full shadow-2xl border-2 border-amber-300 flex items-center gap-2 font-nastaliq font-extrabold text-sm hover:scale-105 active:scale-95 transition cursor-pointer"
+        className="fixed bottom-20 md:bottom-6 left-2.5 sm:left-6 z-40 min-h-[48px] sm:min-h-[54px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-3.5 sm:px-4 py-2.5 rounded-full shadow-2xl border-2 border-amber-300 flex items-center gap-1.5 sm:gap-2 font-nastaliq font-extrabold text-xs sm:text-sm hover:scale-105 active:scale-95 transition cursor-pointer"
         title="بول کر پوچھیں (صوتی مددگار)"
         aria-label="بول کر پوچھیں"
       >
-        <Mic className="w-6 h-6 text-amber-300 shrink-0" />
+        <Mic className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 shrink-0" />
         <span>بول کر پوچھیں</span>
       </button>
 
       {/* Small, Non-Obstructive Clickable Floating Emergency Button (🚨 ایمرجنسی) */}
       <button
         onClick={() => navigateToFooterPage('emergency')}
-        className="fixed bottom-20 sm:bottom-6 right-3 sm:right-6 z-40 min-h-[48px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3.5 py-2.5 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
+        className="fixed bottom-20 md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[48px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2.5 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
         title="ایمرجنسی صفحہ کھولیں"
         aria-label="Emergency Page"
       >

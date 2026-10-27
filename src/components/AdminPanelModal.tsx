@@ -868,7 +868,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                   className="w-full py-2.5 px-3 rounded-xl bg-stone-900 hover:bg-stone-800 text-amber-300 text-xs font-bold flex items-center justify-center gap-2 cursor-pointer shadow"
                 >
                   <ShieldCheck className="w-4 h-4" />
-                  <span>Open Full Admin Supervision Console (#admin)</span>
+                  <span>Open Full Admin Supervision Console</span>
                 </button>
               </div>
             )}
@@ -2465,7 +2465,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                 <div className="space-y-4 font-nastaliq">
                   <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 text-xs text-amber-950 flex items-center justify-between gap-2">
                     <span>
-                      🔒 <strong>صرف ایڈمن اختیار:</strong> بینر کی تصویر لگانا، بدلنا، ہٹانا یا بغیر تصویر (Skip) رکھنا صرف ایڈمن کر سکتا ہے۔ ہر تصویر فون پر 400–800 px اور 80 KB سے کم سائز میں کمپریس ہو کر الگ چھوٹے ڈاکومنٹ میں محفوظ ہوتی ہے۔
+                      🔒 <strong>صرف ایڈمن اختیار:</strong> بینر کی تصویر لگانا، بدلنا، ہٹانا یا بغیر تصویر رکھنا صرف ایڈمن کر سکتا ہے۔
                     </span>
                   </div>
 
@@ -2609,7 +2609,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             )}
                             {ev.hasBannerImage && !ev.skipBannerImage ? (
                               <span className="bg-emerald-100 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                🖼️ تصویر لگی ہے (&lt;80KB)
+                                🖼️ تصویر لگی ہے
                               </span>
                             ) : (
                               <span className="bg-stone-200 text-stone-700 text-[10px] px-2 py-0.5 rounded-full font-bold">

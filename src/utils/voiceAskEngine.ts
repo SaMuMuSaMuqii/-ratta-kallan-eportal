@@ -1057,8 +1057,8 @@ export function answerVoiceQuestion(
     !rawLower.includes('sajid') &&
     !rawLower.includes('arshad');
 
-  if (isAskingPrivateCredential && !isForgotPasswordHowTo && !isAskingAdminPanel) {
-    // Even a signed-in user can NEVER see any password; and no one can ever ask for another person's email/username/password
+  if (isAskingPrivateCredential && !isForgotPasswordHowTo) {
+    // Even a signed-in user can NEVER see any password; and no one can ever ask for another person's or admin's email/username/password
     if (isAskingPasswordDirectly || !isStrictlyOwnProfileQuery) {
       return {
         intent: 'privacy_refusal',
@@ -1077,7 +1077,7 @@ export function answerVoiceQuestion(
   if (isAskingAdminPanel) {
     const adminFeat = PORTAL_FEATURES_INDEX[0];
     const displayText =
-      '🔐 ایڈمن پینل اور سپر ایڈمن کنٹرول ڈیش بورڈ (#admin):\n' +
+      '🔐 ایڈمن پینل اور سپر ایڈمن کنٹرول ڈیش بورڈ:\n' +
       '• یہاں سے ایڈمن اپنی ای میل اور پاس ورڈ کے ذریعے لاگ ان کر سکتے ہیں۔\n' +
       '• اپنا پاس ورڈ تبدیل (Change Password) یا ای میل سے ری سیٹ کر سکتے ہیں۔\n' +
       '• پورٹل کے تمام پروفائلز، بینر تصاویر، خبریں، منڈی ریٹس، شیلٹرز، الرٹس اور رولز کنٹرول کر سکتے ہیں۔\n' +
