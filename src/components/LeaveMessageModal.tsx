@@ -27,7 +27,7 @@ interface LeaveMessageModalProps {
   targetProfile: VillageProfile | null;
   onSendMessage: (
     message: Omit<VillageMessage, 'id' | 'createdAt' | 'isRead'>
-  ) => void;
+  ) => Promise<boolean> | boolean | void;
   defaultSenderName?: string;
   defaultSenderMobile?: string;
   activeSession?: AuthUserSession | null;
@@ -79,6 +79,8 @@ export const LeaveMessageModal: React.FC<LeaveMessageModalProps> = ({
   const [isPlayingRecorded, setIsPlayingRecorded] = useState(false);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
+  const [sendFailed, setSendFailed] = useState(false);
+  const [isSending, setIsSending] = useState(false);
   const [successNotice, setSuccessNotice] = useState(false);
 
   if (!isOpen || !targetProfile) return null;
@@ -156,9 +158,10 @@ export const LeaveMessageModal: React.FC<LeaveMessageModalProps> = ({
     audio.play();
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
+  const executeSend = async () => {
+    if (isSending) return;
     setErrorMsg('');
+    setSendFailed(false);
 
     if (!senderName.trim()) {
       setErrorMsg('براہ کرم اپنا نام درج کریں۔');
@@ -170,33 +173,64 @@ export const LeaveMessageModal: React.FC<LeaveMessageModalProps> = ({
       return;
     }
 
-    if (!messageText.trim() && !recordedAudio) {
+    if (!messageText.trim() && !recordedAudio && !attachmentUrl) {
       setErrorMsg('براہ کرم پیغام لکھیں یا نیچے سے وائس نوٹ ریکارڈ کریں۔');
       return;
     }
 
-    onSendMessage({
-      targetProfileId: targetProfile.id,
-      targetProfileName: targetProfile.name,
-      targetMobile: targetProfile.mobile,
-      senderProfileId: activeSession?.profileId,
-      senderUsername: activeSession?.username,
-      senderName: senderName.trim(),
-      senderMobile: senderMobile.trim(),
-      messageText: messageText.trim() || (attachmentUrl ? 'منسلک تصویر / دستاویز' : 'وائس میسج (صوتی پیغام)'),
-      audioData: recordedAudio?.base64Audio,
-      audioDurationSeconds: recordedAudio?.durationEstimate,
-      attachmentUrl: attachmentUrl || undefined,
-      attachmentType: attachmentUrl ? 'image' : undefined,
-      inquiryType,
-      discussionThread: [],
-    });
+    setIsSending(true);
+    try {
+      const result = await onSendMessage({
+        targetProfileId: targetProfile.id,
+        targetProfileName: targetProfile.name,
+        targetMobile: targetProfile.mobile,
+        senderUid: activeSession?.uid,
+        recipientUid: targetProfile.ownerUid,
+        senderProfileId: activeSession?.profileId,
+        senderUsername: activeSession?.username,
+        senderName: senderName.trim(),
+        senderMobile: senderMobile.trim(),
+        messageText:
+          messageText.trim() ||
+          (attachmentUrl ? 'منسلک تصویر / دستاویز' : 'وائس میسج (صوتی پیغام)'),
+        audioData: recordedAudio?.base64Audio,
+        audioDurationSeconds: recordedAudio?.durationEstimate,
+        attachmentUrl: attachmentUrl || undefined,
+        attachmentType: attachmentUrl ? 'image' : undefined,
+        inquiryType,
+        discussionThread: [],
+      });
 
-    setSuccessNotice(true);
-    setTimeout(() => {
-      setSuccessNotice(false);
-      onClose();
-    }, 1500);
+      if (result === false) {
+        setSendFailed(true);
+        setErrorMsg(
+          'انٹرنیٹ یا سرور کے مسئلے کی وجہ سے پیغام ارسال نہیں ہو سکا۔ آپ کا لکھا ہوا پیغام محفوظ ہے، براہ کرم دوبارہ کوشش کریں۔'
+        );
+        setIsSending(false);
+        return;
+      }
+
+      setIsSending(false);
+      setMessageText('');
+      setAttachmentUrl('');
+      setRecordedAudio(null);
+      setSuccessNotice(true);
+      setTimeout(() => {
+        setSuccessNotice(false);
+        onClose();
+      }, 1500);
+    } catch {
+      setIsSending(false);
+      setSendFailed(true);
+      setErrorMsg(
+        'پیغام بھیجتے وقت تکنیکی خرابی پیش آئی۔ براہ کرم دوبارہ کوشش کریں۔'
+      );
+    }
+  };
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    void executeSend();
   };
 
   return (
@@ -248,9 +282,21 @@ export const LeaveMessageModal: React.FC<LeaveMessageModalProps> = ({
         ) : (
           <form onSubmit={handleSubmit} className="p-5 space-y-4 max-h-[75vh] overflow-y-auto">
             {errorMsg && (
-              <div className="bg-red-50 border border-red-300 text-red-800 p-3 rounded-xl text-xs font-semibold flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{errorMsg}</span>
+              <div className="bg-red-50 border border-red-300 text-red-800 p-3 rounded-xl text-xs font-semibold flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{errorMsg}</span>
+                </div>
+                {sendFailed && (
+                  <button
+                    type="button"
+                    onClick={() => void executeSend()}
+                    disabled={isSending}
+                    className="px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold shrink-0 cursor-pointer transition"
+                  >
+                    ↻ دوبارہ کوشش کریں (Retry)
+                  </button>
+                )}
               </div>
             )}
 
@@ -462,16 +508,18 @@ export const LeaveMessageModal: React.FC<LeaveMessageModalProps> = ({
               <button
                 type="button"
                 onClick={onClose}
-                className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 text-xs font-semibold"
+                disabled={isSending}
+                className="px-4 py-2 rounded-xl border border-stone-300 text-stone-700 hover:bg-stone-100 text-xs font-semibold disabled:opacity-50"
               >
                 {t.cancel}
               </button>
               <button
                 type="submit"
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition"
+                disabled={isSending}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition disabled:opacity-60 cursor-pointer"
               >
                 <Send className="w-4 h-4" />
-                <span>{t.sendDirectMessage}</span>
+                <span>{isSending ? 'بھیجا جا رہا ہے...' : t.sendDirectMessage}</span>
               </button>
             </div>
           </form>

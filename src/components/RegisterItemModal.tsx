@@ -33,9 +33,8 @@ import {
   Language,
 } from '../types';
 import { categoryLabels } from '../data/translations';
-import { CameraCaptureModal } from './CameraCaptureModal';
 import { GuidedVoiceFormModal, GuidedFormData } from './GuidedVoiceFormModal';
-import { compressImageFile } from '../firebase/firestoreService';
+import { ImageUploadFieldCard } from './ImageUploadFieldCard';
 
 export type RegistrationTab = 'profile' | 'mosque' | 'institute' | 'transport';
 
@@ -70,9 +69,6 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
   React.useEffect(() => {
     setActiveTab(defaultTab);
   }, [defaultTab, isOpen]);
-
-  // Common Camera State
-  const [cameraTarget, setCameraTarget] = useState<string | null>(null);
 
   // 1. Profile State
   const [profName, setProfName] = useState('');
@@ -182,30 +178,6 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
   };
 
   if (!isOpen) return null;
-
-  // Image Upload helper with compression
-  const handleFileChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    setter: (b64: string) => void
-  ) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      try {
-        const compressedBlob = await compressImageFile(file, 1200, 0.75);
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setter(reader.result as string);
-        };
-        reader.readAsDataURL(compressedBlob);
-      } catch {
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          setter(reader.result as string);
-        };
-        reader.readAsDataURL(file);
-      }
-    }
-  };
 
   // Submit Profile
   const handleSubmitProfile = (e: React.FormEvent) => {
@@ -646,73 +618,25 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                   />
                 </div>
 
-                {/* 2 Photos: Person and Business */}
-                <div className="grid grid-cols-2 gap-3 pt-1">
-                  <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      1. بندے کی تصویر
-                    </label>
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setCameraTarget('profPerson')}
-                        className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>کیمرہ</span>
-                      </button>
-                      <label className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer">
-                        <Upload className="w-3.5 h-3.5 text-stone-600" />
-                        <span>گیلری</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileChange(e, setProfPersonImg)}
-                        />
-                      </label>
-                    </div>
-                    {profPersonImg && (
-                      <img
-                        src={profPersonImg}
-                        alt="Person"
-                        className="mt-1.5 w-14 h-14 rounded-xl object-cover border"
-                      />
-                    )}
-                  </div>
+                {/* 2 Photos: Person Profile Picture and Business Picture with Crop, Zoom, Reposition & Camera */}
+                <div className="space-y-3 pt-1">
+                  <ImageUploadFieldCard
+                    label="1. بندے کی پروفائل تصویر (سیلفی یا فوٹو)"
+                    subtitle="چہرے کو گول اور چوکور پروفائل فریم میں ایڈجسٹ، کراپ اور زوم کرنے کی سہولت"
+                    value={profPersonImg}
+                    onChange={setProfPersonImg}
+                    mode="avatar"
+                    accentColor="emerald"
+                  />
 
-                  <div>
-                    <label className="block text-[11px] font-bold text-stone-700 mb-1">
-                      2. دکان / کام کی تصویر
-                    </label>
-                    <div className="flex gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => setCameraTarget('profBiz')}
-                        className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        <Camera className="w-3.5 h-3.5 text-emerald-700" />
-                        <span>کیمرہ</span>
-                      </button>
-                      <label className="flex-1 py-1.5 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1 cursor-pointer">
-                        <Upload className="w-3.5 h-3.5 text-stone-600" />
-                        <span>گیلری</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={(e) => handleFileChange(e, setProfBizImg)}
-                        />
-                      </label>
-                    </div>
-                    {profBizImg && (
-                      <img
-                        src={profBizImg}
-                        alt="Business"
-                        className="mt-1.5 w-14 h-14 rounded-xl object-cover border"
-                      />
-                    )}
-                  </div>
+                  <ImageUploadFieldCard
+                    label="2. دکان / کاروبار یا کام کی تصویر"
+                    subtitle="دکان کا بورڈ، لوگو یا کام کی تصویر کراپ، زوم اور مکمل فٹ کرنے کی سہولت"
+                    value={profBizImg}
+                    onChange={setProfBizImg}
+                    mode="business"
+                    accentColor="blue"
+                  />
                 </div>
 
                 {/* Personal Security & Ownership Credentials */}
@@ -721,11 +645,11 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                   lang="en"
                   className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-3.5 rounded-2xl border-2 border-emerald-500/60 space-y-2.5 font-sans text-xs text-left"
                 >
-                  <div className="flex items-center gap-1.5 text-emerald-950 font-bold text-xs">
+                  <div className="flex items-center gap-1.5 text-emerald-950 font-bold text-xs font-sans leading-tight tracking-tight">
                     <KeyRound className="w-4 h-4 text-emerald-700 shrink-0" />
                     <span>Account Sign In & Password Recovery Credentials</span>
                   </div>
-                  <p className="text-[11px] text-stone-600 leading-relaxed">
+                  <p className="text-[11px] text-stone-600 font-sans leading-snug">
                     Your <strong>Username</strong> and <strong>Password</strong> remain private and allow you to sign in later to edit or delete your profile.
                   </p>
 
@@ -954,39 +878,15 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                   </div>
                 </div>
 
-                {/* Mosque Image */}
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    مسجد کی تصویر (کیمرہ یا گیلری)
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCameraTarget('mosque')}
-                      className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Camera className="w-4 h-4 text-emerald-700" />
-                      <span>کیمرہ سے فوٹو لیں</span>
-                    </button>
-                    <label className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer">
-                      <Upload className="w-4 h-4 text-stone-600" />
-                      <span>گیلری سے منتخب کریں</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileChange(e, setMosqueImage)}
-                      />
-                    </label>
-                  </div>
-                  {mosqueImage && (
-                    <img
-                      src={mosqueImage}
-                      alt="Mosque preview"
-                      className="mt-2 h-24 w-full object-cover rounded-xl border"
-                    />
-                  )}
-                </div>
+                {/* Mosque Image with Crop, Zoom, Reposition & Camera */}
+                <ImageUploadFieldCard
+                  label="مسجد کی تصویر (گیلری یا کیمرہ)"
+                  subtitle="مسجد کی عمارت کی تصویر کو کراپ، زوم اور ایڈجسٹ کریں"
+                  value={mosqueImage}
+                  onChange={setMosqueImage}
+                  mode="general"
+                  accentColor="emerald"
+                />
 
                 <button
                   type="submit"
@@ -1096,38 +996,15 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                   />
                 </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    عمارت / سکول کی تصویر
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCameraTarget('institute')}
-                      className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Camera className="w-4 h-4 text-emerald-700" />
-                      <span>کیمرہ سے فوٹو لیں</span>
-                    </button>
-                    <label className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer">
-                      <Upload className="w-4 h-4 text-stone-600" />
-                      <span>گیلری سے منتخب کریں</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileChange(e, setInstImage)}
-                      />
-                    </label>
-                  </div>
-                  {instImage && (
-                    <img
-                      src={instImage}
-                      alt="Institute preview"
-                      className="mt-2 h-24 w-full object-cover rounded-xl border"
-                    />
-                  )}
-                </div>
+                {/* School / Institute Image with Crop, Zoom, Reposition & Camera */}
+                <ImageUploadFieldCard
+                  label="عمارت / سکول کی تصویر (گیلری یا کیمرہ)"
+                  subtitle="تعلیمی ادارے کی تصویر کو کراپ، زوم اور ایڈجسٹ کریں"
+                  value={instImage}
+                  onChange={setInstImage}
+                  mode="general"
+                  accentColor="blue"
+                />
 
                 <button
                   type="submit"
@@ -1273,39 +1150,15 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
                   />
                 </div>
 
-                {/* Vehicle Image */}
-                <div>
-                  <label className="block text-xs font-bold text-stone-700 mb-1">
-                    گاڑی کی تصویر (کیمرہ یا گیلری)
-                  </label>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setCameraTarget('transport')}
-                      className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Camera className="w-4 h-4 text-emerald-700" />
-                      <span>کیمرہ سے فوٹو لیں</span>
-                    </button>
-                    <label className="flex-1 py-2 bg-stone-100 hover:bg-stone-200 border rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer">
-                      <Upload className="w-4 h-4 text-stone-600" />
-                      <span>گیلری سے منتخب کریں</span>
-                      <input
-                        type="file"
-                        accept="image/*"
-                        className="hidden"
-                        onChange={(e) => handleFileChange(e, setTransImage)}
-                      />
-                    </label>
-                  </div>
-                  {transImage && (
-                    <img
-                      src={transImage}
-                      alt="Vehicle preview"
-                      className="mt-2 h-24 w-full object-cover rounded-xl border"
-                    />
-                  )}
-                </div>
+                {/* Vehicle Image with Crop, Zoom, Reposition & Camera */}
+                <ImageUploadFieldCard
+                  label="گاڑی کی تصویر (گیلری یا کیمرہ)"
+                  subtitle="گاڑی یا وین کی تصویر کو کراپ، زوم اور ایڈجسٹ کریں"
+                  value={transImage}
+                  onChange={setTransImage}
+                  mode="general"
+                  accentColor="amber"
+                />
 
                 <button
                   type="submit"
@@ -1318,34 +1171,6 @@ export const RegisterItemModal: React.FC<RegisterItemModalProps> = ({
           </div>
         </div>
       </div>
-
-      {/* Live Camera Modal */}
-      {cameraTarget && (
-        <CameraCaptureModal
-          isOpen={true}
-          onClose={() => setCameraTarget(null)}
-          onCapture={(b64) => {
-            if (cameraTarget === 'profPerson') setProfPersonImg(b64);
-            if (cameraTarget === 'profBiz') setProfBizImg(b64);
-            if (cameraTarget === 'mosque') setMosqueImage(b64);
-            if (cameraTarget === 'institute') setInstImage(b64);
-            if (cameraTarget === 'transport') setTransImage(b64);
-            setCameraTarget(null);
-          }}
-          title={
-            cameraTarget === 'profPerson'
-              ? 'بندے کی لائیو تصویر'
-              : cameraTarget === 'profBiz'
-              ? 'دکان / کام کی تصویر'
-              : cameraTarget === 'mosque'
-              ? 'مسجد کی لائیو تصویر'
-              : cameraTarget === 'institute'
-              ? 'سکول کی تصویر'
-              : 'گاڑی کی لائیو تصویر'
-          }
-          lang={lang}
-        />
-      )}
 
       {/* Guided Voice Form Modal */}
       <GuidedVoiceFormModal

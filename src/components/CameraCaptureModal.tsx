@@ -1,115 +1,136 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { Camera, RefreshCw, Check, X, FlipHorizontal, AlertCircle } from 'lucide-react';
-import { Language } from '../types';
-import { translations } from '../data/translations';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
+import { Camera, X, RefreshCw, Check, AlertCircle, SwitchCamera, Sparkles } from 'lucide-react';
 
 interface CameraCaptureModalProps {
   isOpen: boolean;
   onClose: () => void;
   onCapture: (base64Image: string) => void;
-  title: string;
-  lang: Language;
+  title?: string;
+  mode?: 'avatar' | 'business' | 'banner' | 'general';
 }
 
 export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   isOpen,
   onClose,
   onCapture,
-  title,
-  lang,
+  title = 'کیمرہ سے تصویر لیں',
+  mode = 'avatar',
 }) => {
-  const t = translations[lang];
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
-  const [facingMode, setFacingMode] = useState<'user' | 'environment'>('user');
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [isStarting, setIsStarting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [facingMode, setFacingMode] = useState<'user' | 'environment'>(
+    mode === 'avatar' ? 'user' : 'environment'
+  );
+  const [isLoading, setIsLoading] = useState(false);
+
+  const stopCamera = useCallback(() => {
+    if (stream) {
+      stream.getTracks().forEach((track) => track.stop());
+      setStream(null);
+    }
+  }, [stream]);
 
   useEffect(() => {
     if (isOpen) {
-      setCapturedImage(null);
-      setErrorMsg(null);
-      startCamera(facingMode);
-    } else {
-      stopCamera();
+      setFacingMode(mode === 'avatar' ? 'user' : 'environment');
     }
+  }, [isOpen, mode]);
 
-    return () => {
-      stopCamera();
-    };
-  }, [isOpen, facingMode]);
-
-  const startCamera = async (mode: 'user' | 'environment') => {
+  const startCamera = useCallback(async () => {
+    setIsLoading(true);
+    setError(null);
     stopCamera();
-    setIsStarting(true);
-    setErrorMsg(null);
 
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        throw new Error('کیمرہ سپورٹ دستیاب نہیں ہے۔ براؤزر پرمیشن چیک کریں۔');
-      }
-
       const mediaStream = await navigator.mediaDevices.getUserMedia({
         video: {
-          facingMode: mode,
-          width: { ideal: 720 },
-          height: { ideal: 720 },
+          facingMode: facingMode,
+          width: { ideal: 1280 },
+          height: { ideal: 960 },
         },
         audio: false,
       });
-
       setStream(mediaStream);
       if (videoRef.current) {
         videoRef.current.srcObject = mediaStream;
       }
     } catch (err: any) {
-      console.warn('Camera access failed:', err);
-      setErrorMsg(
-        err.name === 'NotAllowedError'
-          ? 'کیمرے کی اجازت نہیں ملی۔ سیٹنگز میں کیمرہ آن کریں یا فائل اپلوڈ کریں۔'
-          : 'کیمرہ شروع نہیں ہو سکا۔ برائے مہربانی فون کیمرہ چیک کریں۔'
-      );
+      console.error('Camera access error:', err);
+      // Fallback: try generic video constraint if specific facingMode failed on desktop webcam
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          video: true,
+          audio: false,
+        });
+        setStream(fallbackStream);
+        if (videoRef.current) {
+          videoRef.current.srcObject = fallbackStream;
+        }
+      } catch (fallbackErr) {
+        console.error('Fallback camera access error:', fallbackErr);
+        setError(
+          'کیمرہ تک رسائی ممکن نہیں ہو سکی۔ براہ کرم براؤزر میں کیمرہ کی اجازت (Permission) دیں یا "گیلری سے تصویر منتخب کریں" کا آپشن استعمال کریں۔'
+        );
+      }
     } finally {
-      setIsStarting(false);
+      setIsLoading(false);
     }
-  };
+  }, [facingMode, stopCamera]);
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-      setStream(null);
+  useEffect(() => {
+    if (isOpen && !capturedImage) {
+      startCamera();
+    } else if (!isOpen) {
+      stopCamera();
+      setCapturedImage(null);
+      setError(null);
     }
-  };
+    return () => {
+      stopCamera();
+    };
+  }, [isOpen, facingMode]);
 
-  const takePhoto = () => {
-    if (!videoRef.current || !canvasRef.current) return;
+  const handleCapture = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      const context = canvas.getContext('2d');
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 640;
+      if (context && video.videoWidth > 0 && video.videoHeight > 0) {
+        // Capture full high-resolution frame so the user can crop/zoom/reposition freely in the next step
+        const maxDim = 1280;
+        let outW = video.videoWidth;
+        let outH = video.videoHeight;
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+        if (outW > maxDim || outH > maxDim) {
+          const scale = maxDim / Math.max(outW, outH);
+          outW = Math.round(outW * scale);
+          outH = Math.round(outH * scale);
+        }
 
-    // If front camera, flip horizontally for natural selfie view
-    if (facingMode === 'user') {
-      ctx.translate(canvas.width, 0);
-      ctx.scale(-1, 1);
+        canvas.width = outW;
+        canvas.height = outH;
+
+        if (facingMode === 'user') {
+          context.translate(canvas.width, 0);
+          context.scale(-1, 1);
+        }
+
+        context.drawImage(video, 0, 0, outW, outH);
+
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
+        setCapturedImage(dataUrl);
+        stopCamera();
+      }
     }
-
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
-    setCapturedImage(dataUrl);
-    stopCamera();
   };
 
   const handleRetake = () => {
     setCapturedImage(null);
-    startCamera(facingMode);
+    startCamera();
   };
 
   const handleConfirm = () => {
@@ -126,127 +147,156 @@ export const CameraCaptureModal: React.FC<CameraCaptureModalProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-3">
-      <div className="bg-stone-900 border border-stone-700 text-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl flex flex-col">
+    <div
+      className="fixed inset-0 z-[270] flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200"
+      dir="rtl"
+    >
+      <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-200 flex flex-col">
         {/* Header */}
-        <div className="px-4 py-3 bg-stone-800 border-b border-stone-700 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Camera className="w-5 h-5 text-emerald-400" />
-            <h3 className="font-bold text-base">{title}</h3>
+        <div className="bg-slate-900 px-5 py-4 flex items-center justify-between text-white">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/20 border border-emerald-400/30 flex items-center justify-center">
+              <Camera className="w-5 h-5 text-emerald-400" />
+            </div>
+            <div>
+              <h3 className="font-black text-base leading-tight">{title}</h3>
+              <p className="text-[11px] text-slate-300">
+                تصویر کھینچنے کے بعد آپ اسے کراپ اور زوم بھی کر سکیں گے
+              </p>
+            </div>
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="p-1 text-stone-400 hover:text-white rounded-full bg-stone-700/50"
+            className="p-2 hover:bg-white/10 rounded-full transition-colors"
+            title="منسوخ کریں"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Viewport */}
-        <div className="relative aspect-square w-full bg-black flex items-center justify-center overflow-hidden">
-          {errorMsg ? (
-            <div className="p-6 text-center">
-              <AlertCircle className="w-12 h-12 text-amber-400 mx-auto mb-3" />
-              <p className="text-stone-300 text-sm mb-4 leading-relaxed">{errorMsg}</p>
-              <label className="inline-flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl cursor-pointer text-sm font-semibold transition">
-                <span>گیلری سے تصویر منتخب کریں</span>
-                <input
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                      const reader = new FileReader();
-                      reader.onloadend = () => {
-                        onCapture(reader.result as string);
-                        onClose();
-                      };
-                      reader.readAsDataURL(file);
-                    }
-                  }}
-                />
-              </label>
-            </div>
-          ) : capturedImage ? (
-            <img
-              src={capturedImage}
-              alt="Captured"
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <>
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted
-                className={`w-full h-full object-cover ${
-                  facingMode === 'user' ? 'scale-x-[-1]' : ''
-                }`}
-              />
-              {isStarting && (
-                <div className="absolute inset-0 flex items-center justify-center bg-black/60">
-                  <RefreshCw className="w-8 h-8 text-emerald-400 animate-spin" />
+        {/* Camera Viewport */}
+        <div className="p-4 sm:p-5 flex flex-col items-center">
+          <div
+            className={`relative w-full ${
+              mode === 'avatar' ? 'aspect-square max-w-[320px]' : 'aspect-video max-w-[400px]'
+            } bg-slate-950 rounded-2xl overflow-hidden shadow-inner border-2 border-slate-200 flex items-center justify-center`}
+          >
+            {isLoading && !error && (
+              <div className="flex flex-col items-center gap-2 text-white">
+                <div className="w-8 h-8 border-4 border-emerald-500 border-t-transparent rounded-full animate-spin"></div>
+                <span className="text-xs font-bold">کیمرہ آن ہو رہا ہے...</span>
+              </div>
+            )}
+
+            {error && (
+              <div className="p-6 text-center text-rose-400 flex flex-col items-center gap-3">
+                <AlertCircle className="w-10 h-10" />
+                <p className="text-xs font-bold leading-relaxed">{error}</p>
+                <div className="flex items-center gap-2 mt-1">
+                  <button
+                    type="button"
+                    onClick={startCamera}
+                    className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-colors"
+                  >
+                    دوبارہ کوشش کریں
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onClose}
+                    className="px-4 py-2 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 rounded-xl text-xs font-bold transition-colors"
+                  >
+                    بند کریں
+                  </button>
                 </div>
-              )}
-            </>
-          )}
+              </div>
+            )}
 
-          <canvas ref={canvasRef} className="hidden" />
+            {!capturedImage && !error && (
+              <>
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted
+                  className={`w-full h-full object-cover ${facingMode === 'user' ? 'scale-x-[-1]' : ''}`}
+                />
+                {/* Guide Frame Overlay */}
+                {mode === 'avatar' ? (
+                  <div className="absolute inset-0 pointer-events-none flex items-center justify-center">
+                    <div className="w-4/5 h-4/5 rounded-full border-2 border-dashed border-emerald-400/75 shadow-[0_0_0_9999px_rgba(2,6,23,0.35)]" />
+                  </div>
+                ) : (
+                  <div className="absolute inset-3 border-2 border-dashed border-white/45 rounded-xl pointer-events-none" />
+                )}
 
-          {/* Facing mode toggle button (if camera is active) */}
-          {!capturedImage && !errorMsg && (
-            <button
-              onClick={toggleFacingMode}
-              type="button"
-              className="absolute top-3 right-3 bg-black/60 text-white p-2.5 rounded-full border border-white/20 backdrop-blur hover:bg-black/80 transition"
-              title="کیمرہ تبدیل کریں"
-            >
-              <FlipHorizontal className="w-5 h-5" />
-            </button>
-          )}
-        </div>
+                <button
+                  type="button"
+                  onClick={toggleFacingMode}
+                  className="absolute bottom-3 right-3 p-2.5 bg-slate-900/80 hover:bg-slate-900 text-white rounded-full backdrop-blur-md transition-all shadow-lg flex items-center gap-1.5 text-xs font-bold border border-white/15"
+                  title="فرنٹ یا بیک کیمرہ تبدیل کریں"
+                >
+                  <SwitchCamera className="w-4 h-4 text-emerald-400" />
+                  <span className="text-[11px]">کیمرہ بدلیں</span>
+                </button>
+              </>
+            )}
 
-        {/* Action Controls */}
-        <div className="p-4 bg-stone-800 border-t border-stone-700 flex items-center justify-center gap-3">
-          {capturedImage ? (
-            <>
-              <button
-                type="button"
-                onClick={handleRetake}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-stone-700 hover:bg-stone-600 font-semibold text-sm transition"
-              >
-                <RefreshCw className="w-4 h-4" />
-                <span>{t.retake}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleConfirm}
-                className="flex-1 flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-sm shadow-lg shadow-emerald-900/30 transition"
-              >
-                <Check className="w-4 h-4" />
-                <span>{t.confirmPhoto}</span>
-              </button>
-            </>
-          ) : !errorMsg ? (
-            <button
-              type="button"
-              onClick={takePhoto}
-              className="w-16 h-16 rounded-full border-4 border-emerald-400 bg-white hover:bg-stone-200 shadow-xl flex items-center justify-center transition active:scale-95"
-              aria-label="Take Photo"
-            >
-              <div className="w-11 h-11 rounded-full bg-emerald-600"></div>
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={onClose}
-              className="py-2.5 px-6 rounded-xl bg-stone-700 text-stone-200 text-sm font-semibold"
-            >
-              بند کریں
-            </button>
-          )}
+            {capturedImage && (
+              <img src={capturedImage} alt="Captured" className="w-full h-full object-contain bg-slate-950" />
+            )}
+
+            <canvas ref={canvasRef} className="hidden" />
+          </div>
+
+          {/* Controls */}
+          <div className="w-full mt-5 flex flex-col gap-2.5">
+            {!capturedImage ? (
+              <div className="flex items-center gap-2.5">
+                <button
+                  type="button"
+                  onClick={onClose}
+                  className="py-3.5 px-4 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-xs transition-all"
+                >
+                  منسوخ کریں
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCapture}
+                  disabled={isLoading || !!error}
+                  className="flex-1 py-3.5 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-2xl font-black text-sm shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-2 transition-all active:scale-95"
+                >
+                  <Camera className="w-5 h-5" />
+                  <span>تصویر کھینچیں</span>
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex gap-2.5">
+                  <button
+                    type="button"
+                    onClick={handleRetake}
+                    className="flex-1 py-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-2xl font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5 transition-all"
+                  >
+                    <RefreshCw className="w-4 h-4" />
+                    <span>دوبارہ کھینچیں</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleConfirm}
+                    className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-black text-xs sm:text-sm shadow-lg shadow-emerald-600/20 flex items-center justify-center gap-1.5 transition-all active:scale-95"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>آگے بڑھیں اور ایڈجسٹ کریں</span>
+                  </button>
+                </div>
+                <p className="text-[11px] text-slate-500 text-center flex items-center justify-center gap-1">
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  اگلے مرحلے میں آپ اس تصویر کو اپنی مرضی سے کراپ اور زوم کر سکیں گے۔
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

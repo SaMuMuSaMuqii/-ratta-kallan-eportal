@@ -123,25 +123,31 @@ export const InstitutesModal: React.FC<InstitutesModalProps> = ({
               className="bg-stone-50 border border-stone-200 rounded-3xl overflow-hidden shadow-sm"
             >
               {/* Media image */}
-              <div className="relative h-32 sm:h-36 bg-blue-950">
-                <img
-                  src={inst.image}
-                  alt={inst.name}
-                  className="w-full h-full object-cover opacity-90"
-                />
-                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-black/30" />
-                <div className="absolute bottom-2.5 right-3 text-white">
-                  <h4 className="font-bold text-base font-nastaliq text-amber-200 leading-tight">
+              <div className="relative h-36 sm:h-40 bg-blue-950 overflow-hidden">
+                {inst.image ? (
+                  <img
+                    src={inst.image}
+                    alt={inst.name}
+                    className="w-full h-full object-cover opacity-90"
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-blue-300/30">
+                    <GraduationCap className="w-12 h-12" />
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/25" />
+                <div className="absolute bottom-2.5 right-3 left-3 text-white min-w-0">
+                  <h4 className="font-bold text-base sm:text-lg font-nastaliq text-amber-200 leading-tight truncate">
                     {inst.name}
                   </h4>
-                  <p className="text-xs text-stone-300">
+                  <p className="text-xs text-stone-200 truncate">
                     سربراہ / پرنسپل: {inst.headName}
                   </p>
                 </div>
 
                 <button
                   onClick={() => handleSpeakInstitute(inst)}
-                  className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 ${
+                  className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer ${
                     activeAudioId === inst.id
                       ? 'bg-red-600 animate-voice-pulse'
                       : 'bg-black/50 hover:bg-black/70'

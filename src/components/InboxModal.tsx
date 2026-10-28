@@ -41,12 +41,16 @@ interface InboxModalProps {
     replyText: string,
     audioData?: string,
     audioDuration?: number
-  ) => void;
+  ) => Promise<boolean> | boolean | void;
   onReply?: (messageId: string, replyText: string) => void;
   onDeleteMessageForUser?: (messageId: string, role: 'sender' | 'receiver') => void;
   onUndoDeleteMessageForUser?: (messageId: string, role: 'sender' | 'receiver') => void;
   onAdminDeleteMessage?: (messageId: string) => void;
   onReportMessage?: (messageId: string, reason: string) => void;
+  onMarkMessageRead?: (messageId: string) => void;
+  onMarkAllRead?: () => void;
+  onRetrySendMessage?: (msg: VillageMessage) => Promise<boolean> | void;
+  initialSelectedMessageId?: string | null;
   isAdmin?: boolean;
   activeSession?: AuthUserSession | null;
   profiles?: VillageProfile[];
@@ -65,6 +69,10 @@ export const InboxModal: React.FC<InboxModalProps> = ({
   onUndoDeleteMessageForUser,
   onAdminDeleteMessage,
   onReportMessage,
+  onMarkMessageRead,
+  onMarkAllRead,
+  onRetrySendMessage,
+  initialSelectedMessageId,
   isAdmin = false,
   activeSession,
   profiles = [],
@@ -87,6 +95,8 @@ export const InboxModal: React.FC<InboxModalProps> = ({
 
   // Per-message Reply text inputs
   const [replyTextMap, setReplyTextMap] = useState<Record<string, string>>({});
+  const [sendingReplyMap, setSendingReplyMap] = useState<Record<string, boolean>>({});
+  const [replyErrorMap, setReplyErrorMap] = useState<Record<string, string>>({});
 
   // Voice recording state for replies
   const [recordingMessageId, setRecordingMessageId] = useState<string | null>(null);
@@ -94,7 +104,6 @@ export const InboxModal: React.FC<InboxModalProps> = ({
   const [replyVoiceMap, setReplyVoiceMap] = useState<
     Record<string, { base64Audio: string; durationEstimate: number }>
   >({});
-  const [playingVoiceKey, setPlayingVoiceKey] = useState<string | null>(null);
 
   // PART C1: Confirmation modal before per-side message delete + 5-second Undo toast
   const [pendingDeleteTarget, setPendingDeleteTarget] = useState<{
@@ -130,30 +139,90 @@ export const InboxModal: React.FC<InboxModalProps> = ({
     }
   }, [isOpen]);
 
-  if (!isOpen) return null;
-
   // Determine current user context
   const isSuperAdmin = isAdmin || activeSession?.type === 'admin';
   const sessionProfileId = activeSession?.profileId;
   const sessionMobile = activeSession?.mobile || verifiedPhone;
 
   // Normalization helper
-  const cleanDigits = (s?: string) => (s ? s.replace(/\D/g, '') : '');
+  const cleanDigits = (s?: string) => {
+    if (!s) return '';
+    const d = s.replace(/\D/g, '');
+    if (d.startsWith('92') && d.length >= 12) return '0' + d.slice(2);
+    if (d.startsWith('0092') && d.length >= 14) return '0' + d.slice(4);
+    return d;
+  };
+
+  const phonesEqual = (a?: string, b?: string) => {
+    const ca = cleanDigits(a);
+    const cb = cleanDigits(b);
+    if (!ca || !cb || ca.length < 7 || cb.length < 7) return false;
+    return ca === cb || (ca.length >= 10 && cb.length >= 10 && ca.slice(-10) === cb.slice(-10));
+  };
+
+  const sortLatestFirst = (list: VillageMessage[]) =>
+    [...list].sort((a, b) => {
+      const timeA = new Date(a.updatedAt || a.replyCreatedAt || a.createdAt || 0).getTime();
+      const timeB = new Date(b.updatedAt || b.replyCreatedAt || b.createdAt || 0).getTime();
+      return timeB - timeA;
+    });
 
   // Filter messages based on authentication / lookup (Strictly sender or recipient only!)
-  const receivedMessages = messages.filter((m) => {
-    if (m.deletedByRecipient) return false;
-    if (sessionProfileId && m.targetProfileId === sessionProfileId) return true;
-    if (sessionMobile && cleanDigits(m.targetMobile) === cleanDigits(sessionMobile)) return true;
-    return false;
-  });
+  const receivedMessages = sortLatestFirst(
+    messages.filter((m) => {
+      if (m.deletedByRecipient) return false;
+      if (isSuperAdmin && m.targetProfileId === 'admin') return true;
+      if (sessionProfileId && m.targetProfileId === sessionProfileId) return true;
+      if (sessionMobile && phonesEqual(m.targetMobile, sessionMobile)) return true;
+      return false;
+    })
+  );
 
-  const sentMessages = messages.filter((m) => {
-    if (m.deletedBySender) return false;
-    if (sessionProfileId && m.senderProfileId === sessionProfileId) return true;
-    if (sessionMobile && cleanDigits(m.senderMobile) === cleanDigits(sessionMobile)) return true;
-    return false;
-  });
+  const sentMessages = sortLatestFirst(
+    messages.filter((m) => {
+      if (m.deletedBySender) return false;
+      if (sessionProfileId && m.senderProfileId === sessionProfileId) return true;
+      if (sessionMobile && phonesEqual(m.senderMobile, sessionMobile)) return true;
+      return false;
+    })
+  );
+
+  // Switch tab & scroll to initialSelectedMessageId when opened from a notification click
+  useEffect(() => {
+    if (!isOpen || !initialSelectedMessageId) return;
+    const inSent = sentMessages.some((m) => m.id === initialSelectedMessageId);
+    const inReceived = receivedMessages.some((m) => m.id === initialSelectedMessageId);
+    if (inSent && !inReceived) {
+      setActiveTab('sent');
+    } else if (inReceived) {
+      setActiveTab('received');
+    }
+    const timer = setTimeout(() => {
+      const el = document.getElementById(`inbox-msg-card-${initialSelectedMessageId}`);
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+      if (onMarkMessageRead) {
+        onMarkMessageRead(initialSelectedMessageId);
+      }
+    }, 180);
+    return () => clearTimeout(timer);
+  }, [isOpen, initialSelectedMessageId]);
+
+  // Auto-mark visible unread messages as read when user opens the tab
+  useEffect(() => {
+    if (!isOpen || !onMarkMessageRead) return;
+    const listToCheck = activeTab === 'sent' ? sentMessages : receivedMessages;
+    listToCheck.forEach((m) => {
+      if (activeTab === 'received' && (!m.isRead || m.unreadByRecipient)) {
+        onMarkMessageRead(m.id);
+      } else if (activeTab === 'sent' && m.unreadBySender) {
+        onMarkMessageRead(m.id);
+      }
+    });
+  }, [isOpen, activeTab, receivedMessages.length, sentMessages.length]);
+
+  if (!isOpen) return null;
 
   const currentDisplayList = activeTab === 'sent' ? sentMessages : receivedMessages;
 
@@ -198,7 +267,10 @@ export const InboxModal: React.FC<InboxModalProps> = ({
         setRecorder(rec);
         setRecordingMessageId(msgId);
       } else {
-        alert('مائیکروفون شروع نہیں ہو سکا۔ براؤزر کی پرمیشن چیک کریں۔');
+        setReplyErrorMap((prev) => ({
+          ...prev,
+          [msgId]: 'مائیکروفون شروع نہیں ہو سکا۔ براؤزر کی پرمیشن چیک کریں۔',
+        }));
       }
     } catch (e) {
       console.warn('Voice reply record error:', e);
@@ -226,34 +298,60 @@ export const InboxModal: React.FC<InboxModalProps> = ({
     }
   };
 
-  // Submit reply (either text or voice or both)
-  const handleSendDiscussionReply = (msg: VillageMessage) => {
+  // Submit reply (either text or voice or both) with duplicate prevention & retry support
+  const handleSendDiscussionReply = async (msg: VillageMessage) => {
+    if (sendingReplyMap[msg.id]) return;
     const text = (replyTextMap[msg.id] || '').trim();
     const voice = replyVoiceMap[msg.id];
 
     if (!text && !voice) {
-      alert('براہ کرم جواب کا متن لکھیں یا وائس ریکارڈ کریں۔');
+      setReplyErrorMap((prev) => ({
+        ...prev,
+        [msg.id]: 'براہ کرم جواب کا متن لکھیں یا وائس ریکارڈ کریں۔',
+      }));
       return;
     }
 
-    if (onReplyDiscussion) {
-      onReplyDiscussion(
-        msg.id,
-        text || 'وائس جواب (صوتی پیغام)',
-        voice?.base64Audio,
-        voice?.durationEstimate
-      );
-    } else if (onReply && text) {
-      onReply(msg.id, text);
-    }
+    setReplyErrorMap((prev) => ({ ...prev, [msg.id]: '' }));
+    setSendingReplyMap((prev) => ({ ...prev, [msg.id]: true }));
 
-    // Reset inputs for this message
-    setReplyTextMap((prev) => ({ ...prev, [msg.id]: '' }));
-    setReplyVoiceMap((prev) => {
-      const copy = { ...prev };
-      delete copy[msg.id];
-      return copy;
-    });
+    try {
+      let ok = true;
+      if (onReplyDiscussion) {
+        const res = await onReplyDiscussion(
+          msg.id,
+          text || 'وائس جواب (صوتی پیغام)',
+          voice?.base64Audio,
+          voice?.durationEstimate
+        );
+        if (res === false) ok = false;
+      } else if (onReply && text) {
+        onReply(msg.id, text);
+      }
+
+      setSendingReplyMap((prev) => ({ ...prev, [msg.id]: false }));
+      if (!ok) {
+        setReplyErrorMap((prev) => ({
+          ...prev,
+          [msg.id]: 'جواب ارسال نہیں ہو سکا۔ دوبارہ کوشش کریں۔',
+        }));
+        return;
+      }
+
+      // Reset inputs for this message
+      setReplyTextMap((prev) => ({ ...prev, [msg.id]: '' }));
+      setReplyVoiceMap((prev) => {
+        const copy = { ...prev };
+        delete copy[msg.id];
+        return copy;
+      });
+    } catch {
+      setSendingReplyMap((prev) => ({ ...prev, [msg.id]: false }));
+      setReplyErrorMap((prev) => ({
+        ...prev,
+        [msg.id]: 'جواب ارسال کرتے وقت خرابی پیش آئی۔ دوبارہ کوشش کریں۔',
+      }));
+    }
   };
 
   // PART C1: Request per-side delete with Urdu confirmation modal
@@ -459,18 +557,51 @@ export const InboxModal: React.FC<InboxModalProps> = ({
             currentDisplayList.map((msg) => {
               const isSender =
                 (sessionProfileId && msg.senderProfileId === sessionProfileId) ||
-                (sessionMobile && cleanDigits(msg.senderMobile) === cleanDigits(sessionMobile));
+                (sessionMobile && phonesEqual(msg.senderMobile, sessionMobile));
               const isReceiver =
                 (sessionProfileId && msg.targetProfileId === sessionProfileId) ||
-                (sessionMobile && cleanDigits(msg.targetMobile) === cleanDigits(sessionMobile));
+                (sessionMobile && phonesEqual(msg.targetMobile, sessionMobile));
 
               const isRecordingThis = recordingMessageId === msg.id;
               const pendingVoice = replyVoiceMap[msg.id];
+              const isHighlighted = initialSelectedMessageId === msg.id;
+              const isSendingReply = Boolean(sendingReplyMap[msg.id]);
+              const replyErr = replyErrorMap[msg.id];
+
+              const statusBadge = (() => {
+                if (msg.deliveryStatus === 'failed') {
+                  return {
+                    label: '⚠️ ارسال نہیں ہو سکا',
+                    cls: 'bg-red-100 text-red-800 border-red-300',
+                  };
+                }
+                if (msg.deliveryStatus === 'sending') {
+                  return {
+                    label: '⏳ بھیجا جا رہا ہے...',
+                    cls: 'bg-amber-100 text-amber-800 border-amber-300',
+                  };
+                }
+                if (msg.isRead && !msg.unreadByRecipient && !msg.unreadBySender) {
+                  return {
+                    label: '✓✓ پڑھ لیا گیا',
+                    cls: 'bg-emerald-100 text-emerald-800 border-emerald-300',
+                  };
+                }
+                return {
+                  label: '✓✓ موصول ہو گیا',
+                  cls: 'bg-blue-100 text-blue-800 border-blue-300',
+                };
+              })();
 
               return (
                 <div
+                  id={`inbox-msg-card-${msg.id}`}
                   key={msg.id}
-                  className="bg-stone-50 border border-stone-200 rounded-3xl p-3.5 sm:p-4 shadow-sm space-y-3 transition hover:shadow-md"
+                  className={`rounded-3xl p-3.5 sm:p-4 shadow-sm space-y-3 transition hover:shadow-md border ${
+                    isHighlighted
+                      ? 'bg-emerald-50/80 border-emerald-500 ring-2 ring-emerald-400'
+                      : 'bg-stone-50 border-stone-200'
+                  }`}
                 >
                   {/* Top Bar: Sender / Recipient / Timestamp / Inquiry Type */}
                   <div className="flex flex-wrap items-start justify-between gap-2 border-b border-stone-200 pb-2.5">
@@ -486,15 +617,34 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                         <span className="text-xs font-bold text-stone-800 bg-stone-200 px-2 py-0.5 rounded-full">
                           برائے: {msg.targetProfileName}
                         </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${statusBadge.cls}`}
+                        >
+                          {statusBadge.label}
+                        </span>
                       </div>
 
                       <p className="text-[11px] text-stone-500 flex items-center gap-1 mt-1">
                         <Calendar className="w-3 h-3 text-stone-400" />
-                        <span>{new Date(msg.createdAt).toLocaleString('ur-PK')}</span>
+                        <span>
+                          {new Date(
+                            msg.updatedAt || msg.replyCreatedAt || msg.createdAt
+                          ).toLocaleString('ur-PK')}
+                        </span>
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {msg.deliveryStatus === 'failed' && onRetrySendMessage && (
+                        <button
+                          type="button"
+                          onClick={() => void onRetrySendMessage(msg)}
+                          className="px-3 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-bold shadow cursor-pointer transition"
+                        >
+                          ↻ دوبارہ بھیجیں (Retry)
+                        </button>
+                      )}
+
                       <span className="text-[11px] font-semibold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300">
                         {msg.inquiryType === 'charges'
                           ? 'ریٹ استفسار'
@@ -691,6 +841,19 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                       )}
                     </div>
 
+                    {replyErr && (
+                      <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-1.5 rounded-xl text-[11px] font-bold flex items-center justify-between gap-2">
+                        <span>{replyErr}</span>
+                        <button
+                          type="button"
+                          onClick={() => void handleSendDiscussionReply(msg)}
+                          className="px-2.5 py-0.5 rounded-lg bg-red-600 text-white text-[10px] font-bold cursor-pointer"
+                        >
+                          دوبارہ کوشش کریں
+                        </button>
+                      </div>
+                    )}
+
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -705,7 +868,7 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                         onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
-                            handleSendDiscussionReply(msg);
+                            void handleSendDiscussionReply(msg);
                           }
                         }}
                         className="flex-1 rounded-xl border border-stone-300 px-3 py-2 text-xs text-stone-900 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-stone-50"
@@ -737,11 +900,12 @@ export const InboxModal: React.FC<InboxModalProps> = ({
                       {/* Send Button */}
                       <button
                         type="button"
-                        onClick={() => handleSendDiscussionReply(msg)}
-                        className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow transition cursor-pointer shrink-0"
+                        disabled={isSendingReply}
+                        onClick={() => void handleSendDiscussionReply(msg)}
+                        className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1 shadow transition cursor-pointer shrink-0 disabled:opacity-60"
                       >
                         <Send className="w-3.5 h-3.5" />
-                        <span>ارسال کریں</span>
+                        <span>{isSendingReply ? 'بھیجا جا رہا ہے...' : 'ارسال کریں'}</span>
                       </button>
                     </div>
 

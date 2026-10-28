@@ -61,6 +61,12 @@ export const getSpeechRate = (): number => {
 
 // Universal silent audio context unlock for Mobile Safari, Chrome & Android
 let sharedAudioCtx: AudioContext | null = null;
+let audioContextUnlocked = false;
+
+export const isAudioContextUnlocked = (): boolean => {
+  return Boolean(audioContextUnlocked && sharedAudioCtx && sharedAudioCtx.state === 'running');
+};
+
 export const unlockAudioContext = () => {
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -69,7 +75,11 @@ export const unlockAudioContext = () => {
       sharedAudioCtx = new AudioCtx();
     }
     if (sharedAudioCtx.state === 'suspended') {
-      sharedAudioCtx.resume();
+      sharedAudioCtx.resume().then(() => {
+        audioContextUnlocked = true;
+      }).catch(() => {});
+    } else if (sharedAudioCtx.state === 'running') {
+      audioContextUnlocked = true;
     }
     // Play a 1-sample silent buffer to unlock iOS and Android media engines
     const buffer = sharedAudioCtx.createBuffer(1, 1, 22050);
@@ -77,6 +87,7 @@ export const unlockAudioContext = () => {
     source.buffer = buffer;
     source.connect(sharedAudioCtx.destination);
     source.start(0);
+    audioContextUnlocked = true;
 
     // Also wake up speech synthesis if it was sleeping
     if (synth && synth.paused) {
@@ -87,15 +98,21 @@ export const unlockAudioContext = () => {
   }
 };
 
-// Auto-attach unlock on first touch or click
+// Auto-attach unlock on first pointer, touch, click, or keyboard interaction
 if (typeof window !== 'undefined') {
   const onFirstInteraction = () => {
     unlockAudioContext();
-    window.removeEventListener('click', onFirstInteraction);
-    window.removeEventListener('touchstart', onFirstInteraction);
+    if (isAudioContextUnlocked()) {
+      window.removeEventListener('click', onFirstInteraction);
+      window.removeEventListener('touchstart', onFirstInteraction);
+      window.removeEventListener('pointerdown', onFirstInteraction);
+      window.removeEventListener('keydown', onFirstInteraction);
+    }
   };
-  window.addEventListener('click', onFirstInteraction, { passive: true, once: true });
-  window.addEventListener('touchstart', onFirstInteraction, { passive: true, once: true });
+  window.addEventListener('click', onFirstInteraction, { passive: true });
+  window.addEventListener('touchstart', onFirstInteraction, { passive: true });
+  window.addEventListener('pointerdown', onFirstInteraction, { passive: true });
+  window.addEventListener('keydown', onFirstInteraction, { passive: true });
 }
 
 // Comprehensive Urdu character & digraph phonetic mapping for fallback English voices
@@ -322,59 +339,182 @@ export const stopSpeaking = () => {
   }
 };
 
+// Notification sound deduplication state
+let lastChimePlayedAt = 0;
+const playedSoundEventIds = new Set<string>();
+
+export const isNotificationSoundEnabledInPrefs = (): boolean => {
+  if (typeof window === 'undefined') return true;
+  try {
+    const raw = localStorage.getItem('rk_notification_settings_v1');
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.soundEnabled === 'boolean') {
+        return parsed.soundEnabled;
+      }
+    }
+  } catch {}
+  return true;
+};
+
+/**
+ * Generates a tiny in-memory WAV data URI for HTML5 <audio> fallback when Web Audio API is suspended.
+ */
+function createFallbackWavDataUri(freq1 = 587.33, freq2 = 880, durationSec = 0.32): string {
+  const sampleRate = 8000;
+  const numSamples = Math.floor(sampleRate * durationSec);
+  const buffer = new ArrayBuffer(44 + numSamples * 2);
+  const view = new DataView(buffer);
+
+  const writeStr = (offset: number, str: string) => {
+    for (let i = 0; i < str.length; i++) {
+      view.setUint8(offset + i, str.charCodeAt(i));
+    }
+  };
+
+  writeStr(0, 'RIFF');
+  view.setUint32(4, 36 + numSamples * 2, true);
+  writeStr(8, 'WAVE');
+  writeStr(12, 'fmt ');
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * 2, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  writeStr(36, 'data');
+  view.setUint32(40, numSamples * 2, true);
+
+  for (let i = 0; i < numSamples; i++) {
+    const t = i / sampleRate;
+    const freq = t < durationSec * 0.45 ? freq1 : freq2;
+    const envelope = Math.max(0, 1 - t / durationSec);
+    const sample = Math.sin(2 * Math.PI * freq * t) * 0.35 * envelope;
+    view.setInt16(44 + i * 2, Math.floor(sample * 32767), true);
+  }
+
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return 'data:audio/wav;base64,' + btoa(binary);
+}
+
 export const playNotificationChime = (
-  type: 'message' | 'alert' | 'start' | 'teacher' | 'chime' | 'success' = 'start'
-) => {
+  type: 'message' | 'alert' | 'start' | 'teacher' | 'chime' | 'success' = 'start',
+  options?: { eventId?: string; forcePlay?: boolean }
+): boolean => {
+  // Check user's sound preference for message/alert notifications unless explicitly forced (e.g., Test Sound button)
+  if ((type === 'message' || type === 'alert' || type === 'chime') && !options?.forcePlay) {
+    if (!isNotificationSoundEnabledInPrefs()) {
+      return false;
+    }
+  }
+
+  // Deduplicate by eventId so multiple listeners never trigger sound twice for the same message/notification
+  if (options?.eventId) {
+    if (playedSoundEventIds.has(options.eventId)) {
+      return false;
+    }
+    playedSoundEventIds.add(options.eventId);
+    if (playedSoundEventIds.size > 200) {
+      const firstKey = playedSoundEventIds.values().next().value;
+      if (firstKey) playedSoundEventIds.delete(firstKey);
+    }
+  }
+
+  // Throttle rapid duplicate notification chimes within 650ms
+  const nowMs = Date.now();
+  if ((type === 'message' || type === 'alert') && !options?.forcePlay) {
+    if (nowMs - lastChimePlayedAt < 650) {
+      return false;
+    }
+    lastChimePlayedAt = nowMs;
+  }
+
   try {
     const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    if (ctx.state === 'suspended') {
-      ctx.resume();
+    if (AudioCtx) {
+      if (!sharedAudioCtx) {
+        sharedAudioCtx = new AudioCtx();
+      }
+      if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(() => {});
+      }
+
+      if (sharedAudioCtx.state === 'running') {
+        const ctx = sharedAudioCtx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        const now = ctx.currentTime;
+        if (type === 'message') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(587.33, now); // D5
+          osc.frequency.setValueAtTime(880, now + 0.12); // A5
+          gain.gain.setValueAtTime(0.24, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
+          osc.start(now);
+          osc.stop(now + 0.42);
+        } else if (type === 'alert') {
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(523.25, now);
+          osc.frequency.setValueAtTime(783.99, now + 0.12);
+          osc.frequency.setValueAtTime(1046.5, now + 0.24);
+          gain.gain.setValueAtTime(0.26, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
+          osc.start(now);
+          osc.stop(now + 0.52);
+        } else if (type === 'teacher') {
+          osc.frequency.setValueAtTime(523.25, now); // C5
+          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+          osc.frequency.setValueAtTime(1046.5, now + 0.24); // C6
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+          osc.start(now);
+          osc.stop(now + 0.5);
+        } else {
+          osc.frequency.setValueAtTime(523.25, now); // C5
+          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
+          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
+          gain.gain.setValueAtTime(0.18, now);
+          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+          osc.start(now);
+          osc.stop(now + 0.45);
+        }
+        return true;
+      }
     }
 
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-
-    const now = ctx.currentTime;
-    if (type === 'message') {
-      osc.frequency.setValueAtTime(587.33, now); // D5
-      osc.frequency.setValueAtTime(880, now + 0.12); // A5
-      gain.gain.setValueAtTime(0.2, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
-      osc.start(now);
-      osc.stop(now + 0.4);
-    } else if (type === 'alert') {
-      osc.frequency.setValueAtTime(440, now);
-      osc.frequency.setValueAtTime(659.25, now + 0.1);
-      gain.gain.setValueAtTime(0.22, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-      osc.start(now);
-      osc.stop(now + 0.5);
-    } else if (type === 'teacher') {
-      // Pleasant learning chime
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
-      osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
-      osc.frequency.setValueAtTime(1046.5, now + 0.24); // C6
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-      osc.start(now);
-      osc.stop(now + 0.5);
-    } else {
-      osc.frequency.setValueAtTime(523.25, now); // C5
-      osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
-      osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
-      gain.gain.setValueAtTime(0.18, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-      osc.start(now);
-      osc.stop(now + 0.45);
-    }
+    // Fallback 1: HTML5 Audio element with synthesized WAV data URI
+    const wavUri =
+      type === 'alert'
+        ? createFallbackWavDataUri(523.25, 987.77, 0.36)
+        : createFallbackWavDataUri(587.33, 880, 0.32);
+    const fallbackAudio = new Audio(wavUri);
+    fallbackAudio.volume = 0.65;
+    fallbackAudio.play().catch(() => {
+      // Fallback 2: Gentle vibration on mobile devices if audio is blocked prior to user gesture
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        try {
+          navigator.vibrate([120, 60, 120]);
+        } catch {}
+      }
+    });
+    return true;
   } catch (e) {
-    // Ignore audio context autoplay restriction
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate([120, 60, 120]);
+      } catch {}
+    }
+    return false;
   }
 };
 

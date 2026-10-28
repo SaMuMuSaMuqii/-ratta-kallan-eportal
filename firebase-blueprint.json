@@ -1,0 +1,213 @@
+{
+  "entities": {
+    "VillageProfile": {
+      "title": "VillageProfile",
+      "description": "Public directory profile for a village skilled worker, business, or shop in Ratta Kallan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 200 },
+        "fatherName": { "type": "string", "maxLength": 200 },
+        "businessName": { "type": "string", "maxLength": 250 },
+        "category": { "type": "string", "maxLength": 100 },
+        "mobile": { "type": "string", "maxLength": 50 },
+        "whatsapp": { "type": "string", "maxLength": 50 },
+        "address": { "type": "string", "maxLength": 500 },
+        "chargesDescription": { "type": "string", "maxLength": 500 },
+        "availability": { "type": "string", "maxLength": 64 },
+        "createdAt": { "type": "string", "maxLength": 100 },
+        "isVerified": { "type": "boolean" }
+      },
+      "required": ["id", "name", "businessName", "category", "mobile"]
+    },
+    "VillageMosque": {
+      "title": "VillageMosque",
+      "description": "Mosque details and prayer timings in Ratta Kallan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 250 },
+        "imamName": { "type": "string", "maxLength": 200 },
+        "location": { "type": "string", "maxLength": 400 }
+      },
+      "required": ["id", "name"]
+    },
+    "VillageInstitute": {
+      "title": "VillageInstitute",
+      "description": "School, college, or madrasa details and timetable in Ratta Kallan.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 250 },
+        "headName": { "type": "string", "maxLength": 200 },
+        "location": { "type": "string", "maxLength": 400 }
+      },
+      "required": ["id", "name"]
+    },
+    "VillageTransport": {
+      "title": "VillageTransport",
+      "description": "Public transport van, bus, or loader schedule between Ratta Kallan and Jhang.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 250 },
+        "driverName": { "type": "string", "maxLength": 200 },
+        "driverMobile": { "type": "string", "maxLength": 50 },
+        "route": { "type": "string", "maxLength": 400 }
+      },
+      "required": ["id", "title"]
+    },
+    "VillageHospital": {
+      "title": "VillageHospital",
+      "description": "Hospital, clinic, pharmacy, or medical emergency service in Ratta Kallan and Jhang.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "name": { "type": "string", "maxLength": 250 },
+        "contact": { "type": "string", "maxLength": 100 },
+        "address": { "type": "string", "maxLength": 400 }
+      },
+      "required": ["id", "name"]
+    },
+    "VillageNewsEvent": {
+      "title": "VillageNewsEvent",
+      "description": "Village news item, event announcement, or banner slide.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "title": { "type": "string", "maxLength": 300 },
+        "content": { "type": "string", "maxLength": 3000 },
+        "date": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "title"]
+    },
+    "BannerSlideImageDoc": {
+      "title": "BannerSlideImageDoc",
+      "description": "Compressed banner image document (<80KB) stored separately by eventId.",
+      "type": "object",
+      "properties": {
+        "eventId": { "type": "string", "maxLength": 128 },
+        "imageData": { "type": "string", "maxLength": 110000 },
+        "byteSize": { "type": "number" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["eventId", "imageData"]
+    },
+    "VillageMessage": {
+      "title": "VillageMessage",
+      "description": "Two-way message thread between villagers and profile owners.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "targetProfileId": { "type": "string", "maxLength": 128 },
+        "senderName": { "type": "string", "maxLength": 200 },
+        "messageText": { "type": "string", "maxLength": 3000 },
+        "createdAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "targetProfileId", "messageText"]
+    },
+    "PortalSettingDoc": {
+      "title": "PortalSettingDoc",
+      "description": "Portal configuration documents such as banner benefits strip, flood alerts, and general settings.",
+      "type": "object",
+      "properties": {
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      }
+    },
+    "PortalNotificationItem": {
+      "title": "PortalNotificationItem",
+      "description": "In-app and push notification item targeted to a specific villager or broadcast globally.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "recipientProfileId": { "type": "string", "maxLength": 128 },
+        "recipientMobile": { "type": "string", "maxLength": 50 },
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "isGlobal": { "type": "boolean" },
+        "type": { "type": "string", "maxLength": 64 },
+        "title": { "type": "string", "maxLength": 300 },
+        "body": { "type": "string", "maxLength": 2000 },
+        "createdAt": { "type": "string", "maxLength": 100 },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["id", "type", "title", "body", "createdAt"]
+    },
+    "PushSubscriptionDoc": {
+      "title": "PushSubscriptionDoc",
+      "description": "Browser or FCM push notification token registration associated with a villager.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "userKey": { "type": "string", "maxLength": 128 },
+        "fcmToken": { "type": "string", "maxLength": 1024 },
+        "enabled": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["id", "userKey", "enabled", "updatedAt"]
+    },
+    "UserNotificationSettings": {
+      "title": "UserNotificationSettings",
+      "description": "Per-user notification preferences (in-app, sound, push, message alerts).",
+      "type": "object",
+      "properties": {
+        "inAppEnabled": { "type": "boolean" },
+        "soundEnabled": { "type": "boolean" },
+        "pushEnabled": { "type": "boolean" },
+        "messageAlerts": { "type": "boolean" },
+        "announcementAlerts": { "type": "boolean" },
+        "updatedAt": { "type": "string", "maxLength": 100 }
+      },
+      "required": ["inAppEnabled", "soundEnabled", "pushEnabled", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/profiles/{profileId}": {
+      "schema": { "$ref": "#/entities/VillageProfile" },
+      "description": "Public directory profiles of village skilled workers and businesses."
+    },
+    "/mosques/{mosqueId}": {
+      "schema": { "$ref": "#/entities/VillageMosque" },
+      "description": "Village mosques and prayer timings."
+    },
+    "/institutes/{instituteId}": {
+      "schema": { "$ref": "#/entities/VillageInstitute" },
+      "description": "Village schools, colleges, and madrasas."
+    },
+    "/transports/{transportId}": {
+      "schema": { "$ref": "#/entities/VillageTransport" },
+      "description": "Public transport vans and schedules."
+    },
+    "/hospitals/{hospitalId}": {
+      "schema": { "$ref": "#/entities/VillageHospital" },
+      "description": "Hospitals, clinics, and medical emergency contacts."
+    },
+    "/newsEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/VillageNewsEvent" },
+      "description": "Village news events and banner items."
+    },
+    "/bannerImages/{eventId}": {
+      "schema": { "$ref": "#/entities/BannerSlideImageDoc" },
+      "description": "Compressed banner slide images."
+    },
+    "/messages/{messageId}": {
+      "schema": { "$ref": "#/entities/VillageMessage" },
+      "description": "Two-way villager messages."
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/PortalNotificationItem" },
+      "description": "In-app and push notification records."
+    },
+    "/pushSubscriptions/{subId}": {
+      "schema": { "$ref": "#/entities/PushSubscriptionDoc" },
+      "description": "Browser and mobile push token registrations."
+    },
+    "/userNotificationPrefs/{prefId}": {
+      "schema": { "$ref": "#/entities/UserNotificationSettings" },
+      "description": "Saved user notification preferences."
+    },
+    "/settings/{docId}": {
+      "schema": { "$ref": "#/entities/PortalSettingDoc" },
+      "description": "Global portal settings and configurations."
+    }
+  }
+}

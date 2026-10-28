@@ -27,6 +27,7 @@ import {
   Language,
   AuthUserSession,
 } from '../types';
+import { ImageUploadFieldCard } from './ImageUploadFieldCard';
 
 export type EntityLoginType = 'mosque' | 'institute' | 'hospital' | 'transport';
 
@@ -80,6 +81,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
   const [eidUlFitr, setEidUlFitr] = useState('');
   const [eidUlAdha, setEidUlAdha] = useState('');
   const [mosqueNewPass, setMosqueNewPass] = useState('');
+  const [mosqueImage, setMosqueImage] = useState('');
 
   // Institute Edit Form State
   const [instName, setInstName] = useState('');
@@ -90,6 +92,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
   const [instClasses, setInstClasses] = useState('');
   const [instMapUrl, setInstMapUrl] = useState('');
   const [instNewPass, setInstNewPass] = useState('');
+  const [instImage, setInstImage] = useState('');
   const [timetablePeriods, setTimetablePeriods] = useState<
     Array<{ period: string; subject: string; time: string; teacher?: string }>
   >([]);
@@ -115,6 +118,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
   const [transRoute, setTransRoute] = useState('');
   const [transStops, setTransStops] = useState<Array<{ stopName: string; time: string }>>([]);
   const [transNewPass, setTransNewPass] = useState('');
+  const [transImage, setTransImage] = useState('');
 
   // Sync state when modal opens
   React.useEffect(() => {
@@ -134,6 +138,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       setEidUlAdha(mosque.eidUlAdhaTime || '07:00 AM');
       setUsernameInput(mosque.username || '');
       setMosqueNewPass('');
+      setMosqueImage(mosque.image || '');
     } else if (entityType === 'institute' && institute) {
       setInstName(institute.name);
       setInstHead(institute.headName);
@@ -150,6 +155,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       );
       setUsernameInput(institute.username || '');
       setInstNewPass('');
+      setInstImage(institute.image || '');
     } else if (entityType === 'hospital' && hospital) {
       setHospName(hospital.name);
       setHospContact(hospital.contact || '');
@@ -172,6 +178,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       setTransStops(transport.stopsSchedule || []);
       setUsernameInput(transport.username || '');
       setTransNewPass('');
+      setTransImage(transport.image || '');
     }
     setIsAuthenticated(false);
     setPasswordInput('');
@@ -292,6 +299,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       },
       eidUlFitrTime: eidUlFitr.trim(),
       eidUlAdhaTime: eidUlAdha.trim(),
+      image: mosqueImage || mosque.image,
       password: mosqueNewPass.trim() ? mosqueNewPass.trim() : mosque.password,
       lastUpdated: new Date().toISOString(),
     };
@@ -313,6 +321,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       timing: instTiming.trim() || institute.timing,
       classesOffered: instClasses.trim() || institute.classesOffered,
       mapUrl: instMapUrl.trim() || institute.mapUrl,
+      image: instImage || institute.image,
       timetableSchedule: timetablePeriods,
       password: instNewPass.trim() ? instNewPass.trim() : institute.password,
       lastUpdated: new Date().toISOString(),
@@ -362,6 +371,7 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
       arrivalTime: transArrivalTime.trim() || transport.arrivalTime,
       fare: transFare.trim() || transport.fare,
       route: transRoute.trim() || transport.route,
+      image: transImage || transport.image,
       stopsSchedule: transStops,
       password: transNewPass.trim() ? transNewPass.trim() : transport.password,
       lastUpdated: new Date().toISOString(),
@@ -662,6 +672,16 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                   </div>
                 </div>
 
+                <ImageUploadFieldCard
+                  label="مسجد کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                  subtitle="مسجد کی تصویر اپ لوڈ یا کیمرہ سے لیں اور کراپ/زوم کریں"
+                  value={mosqueImage}
+                  onChange={setMosqueImage}
+                  mode="general"
+                  accentColor="emerald"
+                  compact
+                />
+
                 {/* Password reset option for Mosque */}
                 <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
                   <label className="text-xs font-bold text-stone-700 block mb-1">
@@ -812,6 +832,16 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                     ))}
                   </div>
                 </div>
+
+                <ImageUploadFieldCard
+                  label="تعلیمی ادارے / سکول کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                  subtitle="سکول یا کالج کی عمارت کی تصویر کراپ اور ایڈجسٹ کریں"
+                  value={instImage}
+                  onChange={setInstImage}
+                  mode="general"
+                  accentColor="blue"
+                  compact
+                />
 
                 {/* Password reset option for School */}
                 <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">
@@ -1043,6 +1073,16 @@ export const TimetableEditModal: React.FC<TimetableEditModalProps> = ({
                     className="w-full p-2 rounded-xl border text-xs"
                   />
                 </div>
+
+                <ImageUploadFieldCard
+                  label="گاڑی کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                  subtitle="ٹرانسپورٹ گاڑی کی تصویر اپ لوڈ یا کیمرہ سے لیں اور کراپ/زوم کریں"
+                  value={transImage}
+                  onChange={setTransImage}
+                  mode="general"
+                  accentColor="amber"
+                  compact
+                />
 
                 {/* Password reset option for Transport */}
                 <div dir="ltr" lang="en" className="bg-stone-50 p-2.5 rounded-xl border border-stone-200 font-sans text-left">

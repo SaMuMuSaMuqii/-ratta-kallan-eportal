@@ -49,7 +49,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <div className="relative">
             <Megaphone className="w-5 h-5 shrink-0" />
             {newsEventsCount > 0 && (
-              <span className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-amber-500 text-stone-950 text-[10px] leading-none flex items-center justify-center font-bold shadow">
+              <span className="absolute -top-1 -right-1.5 min-w-[16px] min-h-[16px] px-1 rounded-full bg-amber-500 text-stone-950 text-[10px] font-sans leading-none flex items-center justify-center font-bold shadow">
                 {newsEventsCount}
               </span>
             )}
@@ -61,7 +61,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
         <div className="-mt-5">
           <button
             onClick={onTriggerVoiceSearch}
-            className={`w-14 h-14 rounded-full flex flex-col items-center justify-center shadow-xl border-4 border-white transition active:scale-90 ${
+            className={`min-w-[58px] min-h-[58px] px-2 py-1 rounded-full flex flex-col items-center justify-center shadow-xl border-4 border-white transition active:scale-90 ${
               isVoiceSearching
                 ? 'bg-red-600 text-white animate-voice-pulse'
                 : 'bg-emerald-700 hover:bg-emerald-800 text-white shadow-emerald-900/30'
@@ -70,7 +70,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
             aria-label="Voice Search"
           >
             <Mic className="w-5 h-5 animate-pulse shrink-0" />
-            <span className="text-[9px] font-bold leading-[1.6] pb-0.5 block">بولیں</span>
+            <span className="text-[10px] font-bold leading-[1.7] pb-0.5 block">بولیں</span>
           </button>
         </div>
 
@@ -86,7 +86,7 @@ export const MobileBottomNav: React.FC<MobileBottomNavProps> = ({
           <div className="relative">
             <Mail className="w-5 h-5 shrink-0" />
             {unreadMessagesCount > 0 && (
-              <span className="absolute -top-1 -right-1.5 min-w-[16px] h-4 px-1 rounded-full bg-emerald-700 text-white text-[10px] leading-none flex items-center justify-center font-bold shadow">
+              <span className="absolute -top-1 -right-1.5 min-w-[16px] min-h-[16px] px-1 rounded-full bg-emerald-700 text-white text-[10px] font-sans leading-none flex items-center justify-center font-bold shadow">
                 {unreadMessagesCount}
               </span>
             )}

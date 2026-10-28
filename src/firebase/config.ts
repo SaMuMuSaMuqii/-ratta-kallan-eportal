@@ -19,6 +19,7 @@ import {
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
   updateDoc,
   deleteDoc,
@@ -38,16 +39,18 @@ import {
   deleteObject,
   type FirebaseStorage,
 } from 'firebase/storage';
+import appletConfig from '../../firebase-applet-config.json';
 
-// Safe configuration loading using Vite environment variables
+// Load configuration from firebase-applet-config.json with Vite environment fallback
 const env = (import.meta as any).env || {};
 const firebaseConfig = {
-  apiKey: env.VITE_FIREBASE_API_KEY || 'demo-api-key',
-  authDomain: env.VITE_FIREBASE_AUTH_DOMAIN || 'ratta-kallan-portal.firebaseapp.com',
-  projectId: env.VITE_FIREBASE_PROJECT_ID || 'ratta-kallan-portal',
-  storageBucket: env.VITE_FIREBASE_STORAGE_BUCKET || 'ratta-kallan-portal.appspot.com',
-  messagingSenderId: env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1234567890',
-  appId: env.VITE_FIREBASE_APP_ID || '1:1234567890:web:abcdef123456',
+  apiKey: appletConfig.apiKey || env.VITE_FIREBASE_API_KEY || 'demo-api-key',
+  authDomain: appletConfig.authDomain || env.VITE_FIREBASE_AUTH_DOMAIN || 'ratta-kallan-portal.firebaseapp.com',
+  projectId: appletConfig.projectId || env.VITE_FIREBASE_PROJECT_ID || 'ratta-kallan-portal',
+  storageBucket: appletConfig.storageBucket || env.VITE_FIREBASE_STORAGE_BUCKET || 'ratta-kallan-portal.appspot.com',
+  messagingSenderId: appletConfig.messagingSenderId || env.VITE_FIREBASE_MESSAGING_SENDER_ID || '1234567890',
+  appId: appletConfig.appId || env.VITE_FIREBASE_APP_ID || '1:1234567890:web:abcdef123456',
+  firestoreDatabaseId: appletConfig.firestoreDatabaseId || env.VITE_FIRESTORE_DATABASE_ID || '(default)',
 };
 
 // Initialize Firebase App
@@ -61,8 +64,8 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Initialize Cloud Firestore
-export const db: Firestore = getFirestore(app);
+// Initialize Cloud Firestore with provisioned firestoreDatabaseId
+export const db: Firestore = getFirestore(app, appletConfig.firestoreDatabaseId);
 
 // Initialize Firebase Storage
 export const storage: FirebaseStorage = getStorage(app);
@@ -70,12 +73,26 @@ export const storage: FirebaseStorage = getStorage(app);
 // Helper function to check if live Firebase credentials have been configured
 export const isFirebaseConfigured = (): boolean => {
   return (
-    Boolean(env.VITE_FIREBASE_API_KEY) &&
-    env.VITE_FIREBASE_API_KEY !== 'demo-api-key' &&
-    Boolean(env.VITE_FIREBASE_PROJECT_ID) &&
-    env.VITE_FIREBASE_PROJECT_ID !== 'ratta-kallan-portal'
+    Boolean(firebaseConfig.apiKey) &&
+    firebaseConfig.apiKey !== 'demo-api-key' &&
+    Boolean(firebaseConfig.projectId) &&
+    firebaseConfig.projectId !== 'ratta-kallan-portal' &&
+    firebaseConfig.projectId !== 'remixed-project-id'
   );
 };
+
+// Validate connection to Firestore on boot
+if (typeof window !== 'undefined' && isFirebaseConfigured()) {
+  (async function testConnection() {
+    try {
+      await getDocFromServer(doc(db, 'test', 'connection'));
+    } catch (error) {
+      if (error instanceof Error && error.message.includes('the client is offline')) {
+        console.error('Please check your Firebase configuration.');
+      }
+    }
+  })();
+}
 
 export {
   // Auth methods
@@ -93,6 +110,7 @@ export {
   doc,
   setDoc,
   getDoc,
+  getDocFromServer,
   getDocs,
   updateDoc,
   deleteDoc,

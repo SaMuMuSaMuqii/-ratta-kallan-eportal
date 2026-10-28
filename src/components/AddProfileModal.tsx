@@ -22,11 +22,10 @@ import {
 } from 'lucide-react';
 import { VillageProfile, Language } from '../types';
 import { translations, categoryLabels } from '../data/translations';
-import { CameraCaptureModal } from './CameraCaptureModal';
 import { VoiceRecognizer, isSpeechRecognitionSupported } from '../utils/speech';
 import { GuidedVoiceFormModal, GuidedFormData } from './GuidedVoiceFormModal';
 import { parseSpokenPhoneNumber, parseSpokenEmail } from '../utils/voiceFormHelper';
-import { compressImageFile } from '../firebase/firestoreService';
+import { ImageUploadFieldCard } from './ImageUploadFieldCard';
 
 interface AddProfileModalProps {
   isOpen: boolean;
@@ -125,9 +124,6 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
   const [noFemaleCertAccepted, setNoFemaleCertAccepted] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Camera modal state
-  const [cameraModalTarget, setCameraModalTarget] = useState<'person' | 'business' | null>(null);
-
   // Active voice field
   const [activeVoiceField, setActiveVoiceField] = useState<string | null>(null);
   const [recognizer, setRecognizer] = useState<VoiceRecognizer | null>(null);
@@ -171,32 +167,6 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
         setActiveVoiceField(null);
       }
     );
-  };
-
-  const handleFileUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    type: 'person' | 'business'
-  ) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      // Compress on phone before saving/uploading (target < 300KB)
-      const compressed = await compressImageFile(file, 1200, 0.75);
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (type === 'person') setPersonImage(reader.result as string);
-        if (type === 'business') setBusinessImage(reader.result as string);
-      };
-      reader.readAsDataURL(compressed);
-    } catch {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        if (type === 'person') setPersonImage(reader.result as string);
-        if (type === 'business') setBusinessImage(reader.result as string);
-      };
-      reader.readAsDataURL(file);
-    }
   };
 
   const handleGuidedFormCompleted = (data: GuidedFormData) => {
@@ -355,85 +325,25 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
               <span>بول کر فارم بھریں (صوتی رہنمائی برائے ناخواندہ افراد) 🔊</span>
             </button>
 
-            {/* Photos Row: Person & Business (2 images required/supported with live camera or gallery) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-stone-50 p-4 rounded-2xl border border-stone-200">
-              {/* Photo 1: Person */}
-              <div className="flex flex-col items-center text-center">
-                <span className="text-sm font-bold text-stone-800 mb-2 flex items-center gap-1.5">
-                  <User className="w-4 h-4 text-emerald-700" />
-                  <span>1. {t.personPhoto} (سیلفی یا تصویر)</span>
-                </span>
-                <div className="w-28 h-28 rounded-2xl border-2 border-dashed border-emerald-400 bg-white overflow-hidden relative shadow-inner flex items-center justify-center group mb-2">
-                  {personImage ? (
-                    <img
-                      src={personImage}
-                      alt="Person"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <User className="w-12 h-12 text-stone-300" />
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCameraModalTarget('person')}
-                    className="px-2.5 py-1.5 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>لائیو کیمرہ</span>
-                  </button>
-                  <label className="px-2.5 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>گیلری</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'person')}
-                    />
-                  </label>
-                </div>
-              </div>
+            {/* Photos Section: Person Profile Picture & Business / Shop Picture with Crop, Zoom, Reposition & Camera */}
+            <div className="space-y-4">
+              <ImageUploadFieldCard
+                label={`1. ${t.personPhoto} (پروفائل فوٹو / سیلفی)`}
+                subtitle="چہرے کو گول اور چوکور پروفائل فریم میں ایڈجسٹ، کراپ اور زوم کرنے کی سہولت"
+                value={personImage}
+                onChange={setPersonImage}
+                mode="avatar"
+                accentColor="emerald"
+              />
 
-              {/* Photo 2: Business / Work */}
-              <div className="flex flex-col items-center text-center">
-                <span className="text-sm font-bold text-stone-800 mb-2 flex items-center gap-1.5">
-                  <Briefcase className="w-4 h-4 text-emerald-700" />
-                  <span>2. {t.businessPhoto} (دکان یا کام)</span>
-                </span>
-                <div className="w-28 h-28 rounded-2xl border-2 border-dashed border-teal-400 bg-white overflow-hidden relative shadow-inner flex items-center justify-center group mb-2">
-                  {businessImage ? (
-                    <img
-                      src={businessImage}
-                      alt="Business"
-                      className="w-full h-full object-cover"
-                    />
-                  ) : (
-                    <Briefcase className="w-12 h-12 text-stone-300" />
-                  )}
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setCameraModalTarget('business')}
-                    className="px-2.5 py-1.5 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-xs font-semibold flex items-center gap-1 transition shadow-sm"
-                  >
-                    <Camera className="w-3.5 h-3.5" />
-                    <span>لائیو کیمرہ</span>
-                  </button>
-                  <label className="px-2.5 py-1.5 bg-stone-200 hover:bg-stone-300 text-stone-700 rounded-lg text-xs font-semibold flex items-center gap-1 cursor-pointer transition">
-                    <Upload className="w-3.5 h-3.5" />
-                    <span>گیلری</span>
-                    <input
-                      type="file"
-                      accept="image/*"
-                      className="hidden"
-                      onChange={(e) => handleFileUpload(e, 'business')}
-                    />
-                  </label>
-                </div>
-              </div>
+              <ImageUploadFieldCard
+                label={`2. ${t.businessPhoto} (کاروبار، دکان یا کام کی تصویر)`}
+                subtitle="دکان کا بورڈ، لوگو یا کام کی تصویر کراپ، زوم اور مکمل فٹ کرنے کی سہولت"
+                value={businessImage}
+                onChange={setBusinessImage}
+                mode="business"
+                accentColor="blue"
+              />
             </div>
 
             {/* Field: Name with mic */}
@@ -817,11 +727,11 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
               lang="en"
               className="bg-gradient-to-r from-amber-50 to-emerald-50/70 p-4 rounded-2xl border-2 border-emerald-500/60 space-y-3 font-sans text-left"
             >
-              <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm">
+              <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm font-sans leading-tight tracking-tight">
                 <KeyRound className="w-4 h-4 text-emerald-700 shrink-0" />
                 <span>Account Sign In & Password Recovery Credentials</span>
               </div>
-              <p className="text-[11px] text-stone-600 leading-relaxed">
+              <p className="text-[11px] text-stone-600 font-sans leading-snug">
                 Your <strong>Username</strong> and <strong>Password</strong> remain private and allow you to sign in later to edit or delete your profile. Your <strong>Email Address</strong> is used to send a password reset link if you forget your password.
               </p>
 
@@ -937,24 +847,6 @@ export const AddProfileModal: React.FC<AddProfileModalProps> = ({
           </form>
         </div>
       </div>
-
-      {/* Live Camera Modal */}
-      {cameraModalTarget && (
-        <CameraCaptureModal
-          isOpen={Boolean(cameraModalTarget)}
-          onClose={() => setCameraModalTarget(null)}
-          onCapture={(dataUrl) => {
-            if (cameraModalTarget === 'person') setPersonImage(dataUrl);
-            if (cameraModalTarget === 'business') setBusinessImage(dataUrl);
-          }}
-          title={
-            cameraModalTarget === 'person'
-              ? 'بندے کی لائیو تصویر لیں (Selfie/Photo)'
-              : 'کاروبار یا دکان کی تصویر لیں (Shop/Work)'
-          }
-          lang={lang}
-        />
-      )}
 
       {/* Guided Voice Form Modal */}
       <GuidedVoiceFormModal

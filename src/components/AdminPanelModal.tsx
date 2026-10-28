@@ -51,6 +51,7 @@ import {
 import { translations } from '../data/translations';
 import { speakText } from '../utils/speech';
 import {
+  cropAndCompressBannerImage,
   compressBannerImageToUnder80KB,
   saveBannerSlideImageDoc,
   getBannerSlideImageDoc,
@@ -68,6 +69,8 @@ import {
   STORAGE_SUPER_ADMIN_CREDS_V2_KEY,
 } from '../utils/privacySanitizer';
 import { dispatchPasswordResetEmail } from '../firebase/emailNotificationService';
+import { BannerSlideStudioModal } from './BannerSlideStudioModal';
+import { ImageUploadFieldCard } from './ImageUploadFieldCard';
 
 // Official Facebook Icon SVG
 export const FacebookIcon: React.FC<{ className?: string }> = ({ className = 'w-4 h-4' }) => (
@@ -262,6 +265,8 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
     byteSize: number;
   } | null>(null);
   const [bannerStatusMsg, setBannerStatusMsg] = useState<string>('');
+  const [studioModalOpen, setStudioModalOpen] = useState<boolean>(false);
+  const [studioSelectedSlideId, setStudioSelectedSlideId] = useState<string | undefined>(undefined);
 
   // Facebook link form state
   const [fbInput, setFbInput] = useState(facebookPageUrl);
@@ -1344,6 +1349,27 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </div>
                       </div>
 
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+                        <ImageUploadFieldCard
+                          label="پروفائل تصویر (سیلفی / فوٹو)"
+                          subtitle="گول اور چوکور پروفائل فریم میں ایڈجسٹ کریں"
+                          value={editingProfile.personImage || ''}
+                          onChange={(url) => setEditingProfile({ ...editingProfile, personImage: url })}
+                          mode="avatar"
+                          accentColor="emerald"
+                          compact
+                        />
+                        <ImageUploadFieldCard
+                          label="کاروبار / دکان کی تصویر"
+                          subtitle="کاروباری کارڈ کے لیے تصویر کراپ اور ایڈجسٹ کریں"
+                          value={editingProfile.businessImage || ''}
+                          onChange={(url) => setEditingProfile({ ...editingProfile, businessImage: url })}
+                          mode="business"
+                          accentColor="blue"
+                          compact
+                        />
+                      </div>
+
                       <div className="flex justify-end gap-2 pt-2">
                         <button
                           type="button"
@@ -1587,6 +1613,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </div>
                       </div>
 
+                      <ImageUploadFieldCard
+                        label="مسجد کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                        subtitle="مسجد کی تصویر اپ لوڈ یا کیمرہ سے لیں اور کراپ/زوم کریں"
+                        value={editingMosque.image || ''}
+                        onChange={(url) => setEditingMosque({ ...editingMosque, image: url })}
+                        mode="general"
+                        accentColor="emerald"
+                        compact
+                      />
+
                       <div className="flex justify-end gap-2 pt-2">
                         <button
                           type="button"
@@ -1715,6 +1751,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           />
                         </div>
                       </div>
+
+                      <ImageUploadFieldCard
+                        label="تعلیمی ادارے / سکول کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                        subtitle="سکول یا کالج کی تصویر اپ لوڈ یا کیمرہ سے لیں اور کراپ/زوم کریں"
+                        value={editingInstitute.image || ''}
+                        onChange={(url) => setEditingInstitute({ ...editingInstitute, image: url })}
+                        mode="general"
+                        accentColor="blue"
+                        compact
+                      />
 
                       <div className="flex justify-end gap-2 pt-2">
                         <button
@@ -1849,6 +1895,16 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                           />
                         </div>
                       </div>
+
+                      <ImageUploadFieldCard
+                        label="ٹرانسپورٹ گاڑی کی تصویر (گیلری، کیمرہ اور ایڈجسٹمنٹ)"
+                        subtitle="گاڑی کی تصویر اپ لوڈ یا کیمرہ سے لیں اور کراپ/زوم کریں"
+                        value={editingTransport.image || ''}
+                        onChange={(url) => setEditingTransport({ ...editingTransport, image: url })}
+                        mode="general"
+                        accentColor="amber"
+                        compact
+                      />
 
                       <div className="flex justify-end gap-2 pt-2">
                         <button
@@ -2463,10 +2519,51 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               {/* TAB 7: VILLAGE EVENTS & ADMIN-ONLY BANNER SLIDES CONTROL */}
               {activeTab === 'events' && (
                 <div className="space-y-4 font-nastaliq">
-                  <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-3 text-xs text-amber-950 flex items-center justify-between gap-2">
-                    <span>
-                      🔒 <strong>صرف ایڈمن اختیار:</strong> بینر کی تصویر لگانا، بدلنا، ہٹانا یا بغیر تصویر رکھنا صرف ایڈمن کر سکتا ہے۔
-                    </span>
+                  {/* Prominent Main 3 Banner Slides Studio Card */}
+                  <div className="bg-gradient-to-l from-emerald-950 via-teal-900 to-stone-900 text-white border-2 border-amber-400 rounded-3xl p-4 space-y-3 shadow-lg">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <h4 className="font-bold text-sm sm:text-base text-amber-300">
+                          🎨 مین بینر کی ۳ سلائیڈز کا مکمل اسٹوڈیو (تصویر کروپ، فوکل پوائنٹ، ڈیسک ٹاپ/موبائل تصویر، ٹیکسٹ اور واٹس ایپ)
+                        </h4>
+                        <p className="text-xs text-emerald-100 leading-relaxed">
+                          تینوں مین سلائیڈز کی تصویر (بغیر کھینچے فِٹنگ، کروپ، پوزیشن)، تحریر اور واٹس ایپ بٹن کو الگ الگ منظم کریں اور محفوظ کرنے سے پہلے لائیو پری ویو دیکھیں۔
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudioSelectedSlideId(newsEvents[0]?.id);
+                          setStudioModalOpen(true);
+                        }}
+                        className="min-h-[44px] px-4 py-2 rounded-2xl bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold shadow cursor-pointer shrink-0"
+                      >
+                        ✨ بینر سلائیڈز اسٹوڈیو کھولیں
+                      </button>
+                    </div>
+
+                    {/* Quick Direct Buttons for Slide 1, Slide 2, Slide 3 */}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-1">
+                      {newsEvents.slice(0, 3).map((slide, idx) => (
+                        <button
+                          key={slide.id}
+                          type="button"
+                          onClick={() => {
+                            setStudioSelectedSlideId(slide.id);
+                            setStudioModalOpen(true);
+                          }}
+                          className="p-2.5 rounded-2xl bg-black/35 hover:bg-black/55 border border-white/15 text-right transition cursor-pointer flex items-center justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <span className="text-[11px] font-bold text-amber-300 block">
+                              سلائیڈ نمبر {idx + 1} ایڈٹ کریں
+                            </span>
+                            <span className="text-xs text-white truncate block">{slide.title}</span>
+                          </div>
+                          <Edit className="w-4 h-4 text-emerald-300 shrink-0" />
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {bannerStatusMsg && (
@@ -2522,30 +2619,19 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                       required
                     />
 
-                    {/* Admin-Only Single Banner Image Choice: "تصویر لگائیں" OR "بغیر تصویر (Skip)" */}
-                    <div className="p-3 bg-white rounded-2xl border border-stone-200 space-y-2">
-                      <span className="text-xs font-bold text-stone-800 block">
-                        بینر سلائیڈ کی تصویر کا انتخاب (صرف ایک تصویر فی سلائیڈ):
-                      </span>
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow-sm transition">
-                          <ImageIcon className="w-4 h-4" />
-                          <span>تصویر لگائیں</span>
-                          <input
-                            type="file"
-                            accept="image/*"
-                            className="hidden"
-                            onChange={handleNewEventBannerFileSelect}
-                          />
-                        </label>
-
+                    {/* Admin-Only Single Banner Image Choice: Gallery, Camera & Crop OR Skip */}
+                    <div className="p-3 bg-white rounded-2xl border border-stone-200 space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-xs font-bold text-stone-800 block">
+                          بینر سلائیڈ کی تصویر کا انتخاب (گیلری، کیمرہ اور کراپ/ایڈجسٹمنٹ):
+                        </span>
                         <button
                           type="button"
                           onClick={() => {
                             setNewEventImageMode('skip');
                             setNewEventCompressedDoc(null);
                           }}
-                          className={`px-3.5 py-2 rounded-xl text-xs font-bold border transition cursor-pointer ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition cursor-pointer ${
                             newEventImageMode === 'skip'
                               ? 'bg-amber-400 text-stone-950 border-amber-500 shadow-sm'
                               : 'bg-stone-100 text-stone-700 border-stone-300 hover:bg-stone-200'
@@ -2555,18 +2641,44 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </button>
                       </div>
 
-                      {newEventCompressedDoc && newEventImageMode === 'with_image' && (
-                        <div className="flex items-center gap-3 pt-1">
-                          <img
-                            src={newEventCompressedDoc.dataUrl}
-                            alt="Preview"
-                            className="w-20 h-12 object-cover rounded-xl border border-emerald-400"
-                          />
-                          <span className="text-[11px] text-emerald-800 font-bold">
-                            کمپریس شدہ سائز: {Math.round(newEventCompressedDoc.byteSize / 1024)} KB ({newEventCompressedDoc.width}x{newEventCompressedDoc.height} px)
-                          </span>
-                        </div>
-                      )}
+                      <ImageUploadFieldCard
+                        label="نئے بینر سلائیڈ کی تصویر"
+                        subtitle="تصویر منتخب کریں یا کیمرہ سے لیں اور بینر فریم میں کراپ/ایڈجسٹ کریں"
+                        value={newEventCompressedDoc?.dataUrl || ''}
+                        onChange={async (adjustedUrl) => {
+                          if (!adjustedUrl) {
+                            setNewEventCompressedDoc(null);
+                            setNewEventImageMode('skip');
+                            return;
+                          }
+                          try {
+                            const processed = await cropAndCompressBannerImage(adjustedUrl, {
+                              aspectRatio: '16:9',
+                              focalX: 50,
+                              focalY: 50,
+                              zoom: 1,
+                            });
+                            setNewEventCompressedDoc(processed);
+                            setNewEventImageMode('with_image');
+                            setBannerStatusMsg(
+                              `تصویر ایڈجسٹ اور تیار ہے (${processed.width}x${processed.height} px، سائز: ${Math.round(
+                                processed.byteSize / 1024
+                              )} KB)`
+                            );
+                          } catch {
+                            setNewEventCompressedDoc({
+                              dataUrl: adjustedUrl,
+                              width: 720,
+                              height: 405,
+                              byteSize: Math.round((adjustedUrl.length * 3) / 4),
+                            });
+                            setNewEventImageMode('with_image');
+                          }
+                        }}
+                        mode="banner"
+                        accentColor="emerald"
+                        compact
+                      />
                     </div>
 
                     <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
@@ -2589,27 +2701,30 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </div>
                   </form>
 
-                  {/* Existing Events / Banner Slides List with Admin Image Controls */}
+                  {/* Existing Events / Banner Slides List with Admin Image & Studio Controls */}
                   <div className="space-y-2.5">
                     <h5 className="font-bold text-xs text-stone-700">
                       موجودہ بینر سلائیڈز و واقعات ({newsEvents.length}):
                     </h5>
-                    {newsEvents.map((ev) => (
+                    {newsEvents.map((ev, idx) => (
                       <div
                         key={ev.id}
                         className="p-3.5 bg-stone-50 border border-stone-200 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
                       >
                         <div className="space-y-1">
                           <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="bg-emerald-900 text-amber-300 text-[10px] px-2 py-0.5 rounded-md font-bold">
+                              سلائیڈ {idx + 1}
+                            </span>
                             <strong className="text-stone-900 text-sm">{ev.title}</strong>
                             {ev.isPopupOnLaunch && (
                               <span className="bg-amber-100 text-amber-900 text-[10px] px-2 py-0.5 rounded-full font-bold">
                                 پوپ اپ فعال
                               </span>
                             )}
-                            {ev.hasBannerImage && !ev.skipBannerImage ? (
+                            {!ev.skipBannerImage && (ev.hasBannerImage || ev.imageUrl) ? (
                               <span className="bg-emerald-100 text-emerald-900 text-[10px] px-2 py-0.5 rounded-full font-bold">
-                                🖼️ تصویر لگی ہے
+                                🖼️ تصویر فعال ({ev.imageFit === 'contain' ? 'مکمل تصویر' : 'فِٹ کور'})
                               </span>
                             ) : (
                               <span className="bg-stone-200 text-stone-700 text-[10px] px-2 py-0.5 rounded-full font-bold">
@@ -2621,7 +2736,20 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                         </div>
 
                         <div className="flex items-center flex-wrap gap-1.5 shrink-0">
-                          {/* Admin Option 1: تصویر لگائیں */}
+                          {/* Open Full Slide Studio (Crop, Focal Point, Mobile Image, Text & WhatsApp) */}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setStudioSelectedSlideId(ev.id);
+                              setStudioModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 rounded-xl text-[11px] font-bold bg-amber-400 hover:bg-amber-300 text-stone-950 flex items-center gap-1 cursor-pointer shadow-xs"
+                          >
+                            <Edit className="w-3.5 h-3.5" />
+                            <span>کروپ، پوزیشن و ٹیکسٹ ایڈٹ</span>
+                          </button>
+
+                          {/* Admin Quick Option 1: تصویر لگائیں */}
                           <label className="px-2.5 py-1.5 rounded-xl text-[11px] font-bold bg-emerald-700 hover:bg-emerald-800 text-white flex items-center gap-1 cursor-pointer shadow-xs">
                             <ImageIcon className="w-3.5 h-3.5" />
                             <span>تصویر لگائیں</span>
@@ -2633,7 +2761,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                             />
                           </label>
 
-                          {/* Admin Option 2: بغیر تصویر (Skip) */}
+                          {/* Admin Quick Option 2: بغیر تصویر (Skip) */}
                           <button
                             type="button"
                             onClick={() => handleExistingSlideSkipImage(ev)}
@@ -2916,47 +3044,26 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
               {/* TAB 9: SETTINGS & BACKGROUND IMAGE & FACEBOOK */}
               {activeTab === 'settings' && (
                 <div className="space-y-4 font-nastaliq">
-                  {/* Village Background Image Upload Box */}
+                  {/* Village Background Image Upload & Adjust Box */}
                   <div className="bg-emerald-50/70 border-2 border-emerald-300 rounded-3xl p-4 space-y-3">
-                    <div className="flex items-center gap-2 text-emerald-950 font-bold text-sm">
-                      <ImageIcon className="w-5 h-5 text-emerald-700" />
-                      <span>پورٹل کی بیک گراؤنڈ تصویر (Village Background Image)</span>
-                    </div>
-
-                    <p className="text-xs text-stone-700 leading-relaxed">
-                      اپنے گاؤں رتہ کلاں کی خوبصورت تصویر موبائل سے اپلوڈ کریں، یہ پوری ایپ کے پس منظر میں نظر آئے گی۔
-                    </p>
-
-                    {/* Preview */}
-                    <div className="relative h-32 w-full rounded-2xl overflow-hidden bg-stone-900 border border-stone-300">
-                      {bgInput ? (
-                        <img
-                          src={bgInput}
-                          alt="Village Background"
-                          className="w-full h-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex items-center justify-center h-full text-stone-400 text-xs">
-                          کوئی بیک گراؤنڈ تصویر منتخب نہیں ہے
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <label className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow transition">
-                        <Upload className="w-4 h-4" />
-                        <span>موبائل گیلری سے نئی تصویر لگائیں</span>
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          onChange={handleBgFileUpload}
-                        />
-                      </label>
-                      {bgSaveMsg && (
-                        <span className="text-xs text-emerald-700 font-bold">تصویر تبدیل ہو گئی!</span>
-                      )}
-                    </div>
+                    <ImageUploadFieldCard
+                      label="پورٹل کی بیک گراؤنڈ تصویر (Village Background Image)"
+                      subtitle="اپنے گاؤں رتہ کلاں کی خوبصورت تصویر گیلری یا کیمرہ سے اپلوڈ کریں اور کراپ/زوم کر کے محفوظ کریں"
+                      value={bgInput}
+                      onChange={(newUrl) => {
+                        setBgInput(newUrl);
+                        onUpdateVillageBgImage(newUrl);
+                        setBgSaveMsg(true);
+                        setTimeout(() => setBgSaveMsg(false), 3000);
+                      }}
+                      mode="banner"
+                      accentColor="emerald"
+                    />
+                    {bgSaveMsg && (
+                      <span className="text-xs text-emerald-700 font-bold block">
+                        ✓ پورٹل بیک گراؤنڈ تصویر کامیابی سے اپڈیٹ ہو گئی!
+                      </span>
+                    )}
                   </div>
 
                   {/* Official Facebook Page Link Box */}
@@ -3011,6 +3118,24 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
         )}
 
       </div>
+
+      {/* Interactive Banner Slide Studio Modal */}
+      <BannerSlideStudioModal
+        isOpen={studioModalOpen}
+        onClose={() => setStudioModalOpen(false)}
+        events={newsEvents}
+        initialSelectedId={studioSelectedSlideId}
+        onSaveSlide={(updatedEv) => {
+          if (onUpdateNewsEvent) {
+            onUpdateNewsEvent(updatedEv);
+          }
+          if (onBannerImagesChanged) {
+            onBannerImagesChanged();
+          }
+          setBannerStatusMsg(`سلائیڈ "${updatedEv.title}" کامیابی سے اپڈیٹ ہو گئی!`);
+        }}
+        onBannerImagesChanged={onBannerImagesChanged}
+      />
     </div>
   );
 };

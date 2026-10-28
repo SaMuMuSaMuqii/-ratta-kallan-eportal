@@ -42,6 +42,7 @@ import {
   Trash2,
   RefreshCw,
   UserCheck,
+  Bell,
 } from 'lucide-react';
 import {
   VillageProfile,
@@ -62,6 +63,8 @@ import {
   HelpGuideItem,
   CustomSearchKeywordItem,
   FloodAlertStatus,
+  PortalNotificationItem,
+  UserNotificationSettings,
 } from './types';
 import { translations, categoryLabels } from './data/translations';
 import { initialProfiles, initialAnnouncements, initialNewsEvents } from './data/initialProfiles';
@@ -132,7 +135,20 @@ import {
   saveMessageToFirestore,
   deleteMessageFromFirestore,
   saveProfileToFirestore,
+  deleteProfileFromFirestore,
+  saveMosqueToFirestore,
+  deleteMosqueFromFirestore,
+  saveInstituteToFirestore,
+  deleteInstituteFromFirestore,
+  saveTransportToFirestore,
+  deleteTransportFromFirestore,
+  saveHospitalToFirestore,
+  deleteHospitalFromFirestore,
+  saveNewsEventToFirestore,
+  deleteNewsEventFromFirestore,
   saveBannerSlideImageDoc,
+  deleteBannerSlideImageDoc,
+  ensureInitialFirestoreSeed,
   subscribeProfiles,
   subscribeMessages,
   subscribeNewsEvents,
@@ -140,11 +156,35 @@ import {
   subscribeInstitutes,
   subscribeTransports,
   subscribeHospitals,
+  subscribePortalSettings,
+  savePortalSettingsToFirestore,
+  subscribeNotifications,
+  saveNotificationToFirestore,
+  deleteNotificationFromFirestore,
 } from './firebase/firestoreService';
 import { dispatchMessageNotificationEmail } from './firebase/emailNotificationService';
+import { NotificationCenterModal } from './components/NotificationCenterModal';
+import {
+  getUserNotificationKey,
+  loadNotificationSettings,
+  saveNotificationSettings,
+  syncNotificationSettingsFromCloud,
+  isCurrentUserRecipientOfMessage,
+  isCurrentUserSenderOfMessage,
+  isMessageUnreadForCurrentUser,
+  isNotificationForCurrentUser,
+  isNotificationUnreadForCurrentUser,
+  markGlobalNotificationIdRead,
+  markNotificationIdClearedLocally,
+  requestAndRegisterPushNotifications,
+  dissociatePushSubscriptionOnLogout,
+  dispatchSystemPushNotification,
+  phonesMatch,
+} from './utils/notificationManager';
 
 const STORAGE_PROFILES_KEY = 'ratta_kallan_profiles_v6';
 const STORAGE_MESSAGES_KEY = 'ratta_kallan_messages_v6';
+const STORAGE_NOTIFICATIONS_KEY = 'ratta_kallan_notifications_v1';
 const STORAGE_DELETED_ARCHIVE_KEY = 'ratta_kallan_deleted_archive_v6';
 const STORAGE_ANNOUNCEMENTS_KEY = 'ratta_kallan_announcements_v6';
 const STORAGE_NEWS_KEY = 'ratta_kallan_news_events_v7';
@@ -205,6 +245,16 @@ export default function App() {
       if (saved) return JSON.parse(saved);
     } catch (e) {
       console.warn('Failed to load messages:', e);
+    }
+    return [];
+  });
+
+  const [portalNotifications, setPortalNotifications] = useState<PortalNotificationItem[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_NOTIFICATIONS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch (e) {
+      console.warn('Failed to load notifications:', e);
     }
     return [];
   });
@@ -350,6 +400,10 @@ export default function App() {
   }, [messages]);
 
   useEffect(() => {
+    localStorage.setItem(STORAGE_NOTIFICATIONS_KEY, JSON.stringify(portalNotifications));
+  }, [portalNotifications]);
+
+  useEffect(() => {
     localStorage.setItem(STORAGE_DELETED_ARCHIVE_KEY, JSON.stringify(deletedMessagesArchive));
   }, [deletedMessagesArchive]);
 
@@ -425,8 +479,18 @@ export default function App() {
   const [availabilityFilter, setAvailabilityFilter] = useState<string>('all');
   const [onlyAvailableWorkers, setOnlyAvailableWorkers] = useState<boolean>(false);
 
-  // Firestore Real-Time Subscriptions
+  // Firestore Real-Time Subscriptions & Automatic Initial Cloud Seeding
   useEffect(() => {
+    ensureInitialFirestoreSeed({
+      profiles,
+      mosques,
+      institutes,
+      transports,
+      hospitals,
+      newsEvents,
+      announcements,
+    }).catch(() => {});
+
     const unsubProfiles = subscribeProfiles((list) => {
       if (list && list.length > 0) setProfiles(sanitizePublicProfileList(list));
     });
@@ -434,7 +498,10 @@ export default function App() {
       if (list) setMessages(list);
     });
     const unsubNews = subscribeNewsEvents((list) => {
-      if (list && list.length > 0) setNewsEvents(list);
+      if (list && list.length > 0) {
+        setNewsEvents(list);
+        setBannerImagesVersion((v) => v + 1);
+      }
     });
     const unsubMosques = subscribeMosques((list) => {
       if (list && list.length > 0) setMosques(list);
@@ -448,6 +515,35 @@ export default function App() {
     const unsubHospitals = subscribeHospitals((list) => {
       if (list && list.length > 0) setHospitals(list);
     });
+    const unsubNotifications = subscribeNotifications((list) => {
+      if (list) setPortalNotifications(list);
+    });
+    const unsubSettings = subscribePortalSettings((settingsData) => {
+      if (Array.isArray(settingsData.mandiRates) && settingsData.mandiRates.length > 0) {
+        setMandiRates(settingsData.mandiRates);
+      }
+      if (Array.isArray(settingsData.shelters) && settingsData.shelters.length > 0) {
+        setShelters(settingsData.shelters);
+      }
+      if (Array.isArray(settingsData.helpGuides) && settingsData.helpGuides.length > 0) {
+        setHelpGuides(settingsData.helpGuides);
+      }
+      if (Array.isArray(settingsData.customKeywords)) {
+        setCustomKeywords(settingsData.customKeywords);
+      }
+      if (settingsData.floodAlertStatus) {
+        setFloodAlertStatus(settingsData.floodAlertStatus);
+      }
+      if (Array.isArray(settingsData.helpNotices)) {
+        setHelpNotices(settingsData.helpNotices);
+      }
+      if (typeof settingsData.facebookPageUrl === 'string' && settingsData.facebookPageUrl) {
+        setFacebookPageUrl(settingsData.facebookPageUrl);
+      }
+      if (typeof settingsData.villageBgImage === 'string') {
+        setVillageBgImage(settingsData.villageBgImage);
+      }
+    });
 
     return () => {
       unsubProfiles();
@@ -457,6 +553,8 @@ export default function App() {
       unsubInstitutes();
       unsubTransports();
       unsubHospitals();
+      unsubNotifications();
+      unsubSettings();
     };
   }, []);
 
@@ -468,6 +566,8 @@ export default function App() {
   const [isMainMenuOpen, setIsMainMenuOpen] = useState(false);
   const [isInboxModalOpen, setIsInboxModalOpen] = useState(false);
   const [inboxPreselectedPhone, setInboxPreselectedPhone] = useState<string>('');
+  const [inboxInitialMessageId, setInboxInitialMessageId] = useState<string | null>(null);
+  const [isNotificationCenterOpen, setIsNotificationCenterOpen] = useState(false);
   const [isAdminModalOpen, setIsAdminModalOpen] = useState(false);
   const [isMosquesModalOpen, setIsMosquesModalOpen] = useState(false);
   const [isInstitutesModalOpen, setIsInstitutesModalOpen] = useState(false);
@@ -611,6 +711,12 @@ export default function App() {
 
   // In-App Notification Toast
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const [toastActionTarget, setToastActionTarget] = useState<{
+    messageId?: string;
+    recipientPhone?: string;
+    openNotifications?: boolean;
+  } | null>(null);
+  const toastTimerRef = useRef<any>(null);
 
   // Global Audio / Voice Search state
   const [isVoiceSearching, setIsVoiceSearching] = useState(false);
@@ -623,34 +729,110 @@ export default function App() {
   // Mobile Bottom Nav active tab
   const [mobileTab, setMobileTab] = useState<'home' | 'news' | 'messages' | 'add'>('home');
 
+  // Matched registered profile for current user's phone or session
+  const matchedUserProfile = useMemo(() => {
+    if (activeUserSession?.profileId) {
+      const bySession = profiles.find((p) => p.id === activeUserSession.profileId);
+      if (bySession) return bySession;
+    }
+    const phoneToMatch = currentUserPhone || activeUserSession?.mobile;
+    if (!phoneToMatch) return null;
+    return profiles.find((p) => phonesMatch(p.mobile, phoneToMatch)) || null;
+  }, [currentUserPhone, activeUserSession, profiles]);
+
+  // Current user notification identity key
+  const currentUserNotifKey = useMemo(
+    () =>
+      getUserNotificationKey(
+        activeUserSession,
+        currentUserPhone,
+        matchedUserProfile?.id || null
+      ),
+    [activeUserSession, currentUserPhone, matchedUserProfile?.id]
+  );
+
+  // Persistent Notification Settings (In-App, Sound, Push, Message Alerts, Announcement Alerts)
+  const [notificationSettings, setNotificationSettings] =
+    useState<UserNotificationSettings>(() => loadNotificationSettings());
+
+  useEffect(() => {
+    const localPrefs = loadNotificationSettings(currentUserNotifKey);
+    setNotificationSettings(localPrefs);
+    syncNotificationSettingsFromCloud(currentUserNotifKey)
+      .then((remote) => {
+        if (remote) setNotificationSettings(remote);
+      })
+      .catch(() => {});
+  }, [currentUserNotifKey]);
+
+  const handleUpdateNotificationSettings = async (next: UserNotificationSettings) => {
+    const saved = await saveNotificationSettings(next, currentUserNotifKey);
+    setNotificationSettings(saved);
+  };
+
   // Unread message count per profile ID
   const unreadCountsByProfileId = useMemo(() => {
     const counts: Record<string, number> = {};
     messages.forEach((m) => {
-      if (!m.isRead) {
+      if (m.deletedByRecipient) return;
+      const isUnread =
+        typeof m.unreadByRecipient === 'boolean' ? m.unreadByRecipient : !m.isRead;
+      if (isUnread) {
         counts[m.targetProfileId] = (counts[m.targetProfileId] || 0) + 1;
       }
     });
     return counts;
   }, [messages]);
 
+  // Recipient-scoped unread messages count for the current user (never leaks other villagers' unread counts)
   const totalUnreadCount = useMemo(() => {
-    return messages.filter((m) => !m.isRead).length;
-  }, [messages]);
+    return messages.filter((m) =>
+      isMessageUnreadForCurrentUser(
+        m,
+        activeUserSession,
+        currentUserPhone,
+        matchedUserProfile?.id || null
+      )
+    ).length;
+  }, [messages, activeUserSession, currentUserPhone, matchedUserProfile?.id]);
 
-  // Matched registered profile for current user's phone
-  const matchedUserProfile = useMemo(() => {
-    if (!currentUserPhone) return null;
-    const clean = currentUserPhone.replace(/\D/g, '');
-    return profiles.find((p) => p.mobile.replace(/\D/g, '') === clean) || null;
-  }, [currentUserPhone, profiles]);
+  // Notifications scoped strictly to the current user
+  const userScopedNotifications = useMemo(() => {
+    return portalNotifications.filter((n) =>
+      isNotificationForCurrentUser(
+        n,
+        activeUserSession,
+        currentUserPhone,
+        matchedUserProfile?.id || null,
+        currentUserNotifKey
+      )
+    );
+  }, [
+    portalNotifications,
+    activeUserSession,
+    currentUserPhone,
+    matchedUserProfile?.id,
+    currentUserNotifKey,
+  ]);
+
+  const unreadNotificationIds = useMemo(() => {
+    const set = new Set<string>();
+    userScopedNotifications.forEach((n) => {
+      if (isNotificationUnreadForCurrentUser(n, currentUserNotifKey)) {
+        set.add(n.id);
+      }
+    });
+    return set;
+  }, [userScopedNotifications, currentUserNotifKey]);
 
   // Messages directed to this user's phone
   const userDirectMessagesCount = useMemo(() => {
     if (!currentUserPhone) return 0;
-    const clean = currentUserPhone.replace(/\D/g, '');
     return messages.filter(
-      (m) => m.targetMobile.replace(/\D/g, '') === clean && !m.isRead
+      (m) =>
+        !m.deletedByRecipient &&
+        phonesMatch(m.targetMobile, currentUserPhone) &&
+        (typeof m.unreadByRecipient === 'boolean' ? m.unreadByRecipient : !m.isRead)
     ).length;
   }, [currentUserPhone, messages]);
 
@@ -1105,7 +1287,7 @@ export default function App() {
     });
   };
 
-  // Add / Save Profile (Strictly sanitized via whitelist before storing in public directory)
+  // Add / Save Profile (Strictly sanitized via whitelist before storing in public directory & Cloud Firestore)
   const handleSaveProfile = (
     profileData: Omit<VillageProfile, 'id' | 'createdAt' | 'isVerified'> | VillageProfile
   ) => {
@@ -1125,6 +1307,7 @@ export default function App() {
         }
         return [cleanProfile, ...prev];
       });
+      saveProfileToFirestore(profileData as VillageProfile).catch(() => {});
       showToastNotification(`پروفائل "${cleanProfile.name}" محفوظ ہو گیا!`);
       return;
     }
@@ -1134,15 +1317,17 @@ export default function App() {
       username: profileData.username,
       password: profileData.password,
     });
-    const newProfile: VillageProfile = sanitizePublicProfile({
+    const fullNewProfile = {
       ...profileData,
       id: newProfileId,
       createdAt: new Date().toISOString(),
       isVerified: false,
       isApproved: true,
-    } as VillageProfile);
+    } as VillageProfile;
+    const newProfile: VillageProfile = sanitizePublicProfile(fullNewProfile);
     setProfiles((prev) => [newProfile, ...prev]);
     setSelectedProfile(newProfile);
+    saveProfileToFirestore(fullNewProfile).catch(() => {});
 
     // Admin Alert Hook for New Shop/Business Registration
     const newRegAlert: AdminAlertItem = {
@@ -1162,11 +1347,11 @@ export default function App() {
 
   // User Reporting / Violation Alert Hook for Portal Administration
   const handleReportViolation = (profile: VillageProfile, reason: string) => {
+    const updatedProfile = { ...profile, isReported: true, reportReason: reason };
     setProfiles((prev) =>
-      prev.map((p) =>
-        p.id === profile.id ? { ...p, isReported: true, reportReason: reason } : p
-      )
+      prev.map((p) => (p.id === profile.id ? updatedProfile : p))
     );
+    saveProfileToFirestore(updatedProfile).catch(() => {});
     const newAlert: AdminAlertItem = {
       id: `alert-viol-${Date.now()}`,
       type: 'violation_report',
@@ -1184,16 +1369,17 @@ export default function App() {
   // Report Abusive Message (Marks message as reported so Admin can read it in Reported Messages)
   const handleReportMessage = (messageId: string, reason: string) => {
     setMessages((prev) =>
-      prev.map((m) =>
-        m.id === messageId
-          ? {
-              ...m,
-              isReported: true,
-              reportReason: reason,
-              reportedAt: new Date().toISOString(),
-            }
-          : m
-      )
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const reportedMsg = {
+          ...m,
+          isReported: true,
+          reportReason: reason,
+          reportedAt: new Date().toISOString(),
+        };
+        saveMessageToFirestore(reportedMsg).catch(() => {});
+        return reportedMsg;
+      })
     );
     const targetMsg = messages.find((m) => m.id === messageId);
     if (targetMsg) {
@@ -1215,18 +1401,22 @@ export default function App() {
   const handleSaveHelpNotice = (item: PublicHelpPostItem) => {
     setHelpNotices((prev) => {
       const idx = prev.findIndex((h) => h.id === item.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = item;
-        return copy;
-      }
-      return [item, ...prev];
+      const next =
+        idx >= 0
+          ? prev.map((h, i) => (i === idx ? item : h))
+          : [item, ...prev];
+      savePortalSettingsToFirestore({ helpNotices: next }).catch(() => {});
+      return next;
     });
     showToastNotification('امداد / عطیہ خون کی پوسٹ محفوظ ہو گئی!');
   };
 
   const handleDeleteHelpNotice = (id: string) => {
-    setHelpNotices((prev) => prev.filter((h) => h.id !== id));
+    setHelpNotices((prev) => {
+      const next = prev.filter((h) => h.id !== id);
+      savePortalSettingsToFirestore({ helpNotices: next }).catch(() => {});
+      return next;
+    });
     showToastNotification('پوسٹ حذف کر دی گئی!');
   };
 
@@ -1253,6 +1443,7 @@ export default function App() {
       }
       return [mosque, ...prev];
     });
+    saveMosqueToFirestore(mosque).catch(() => {});
     showToastNotification(`جامع مسجد "${mosque.name}" کے اوقات و تفصیلات محفوظ ہو گئیں!`);
   };
 
@@ -1267,22 +1458,26 @@ export default function App() {
       }
       return [institute, ...prev];
     });
+    saveInstituteToFirestore(institute).catch(() => {});
     showToastNotification(`تعلیمی ادارہ "${institute.name}" کا ٹائم ٹیبل محفوظ ہو گیا!`);
   };
 
   // Delete Handlers for Super Admin
   const handleDeleteMosque = (id: string) => {
     setMosques((prev) => prev.filter((m) => m.id !== id));
+    deleteMosqueFromFirestore(id).catch(() => {});
     showToastNotification('جامع مسجد کو پورٹل سے حذف کر دیا گیا!');
   };
 
   const handleDeleteInstitute = (id: string) => {
     setInstitutes((prev) => prev.filter((inst) => inst.id !== id));
+    deleteInstituteFromFirestore(id).catch(() => {});
     showToastNotification('تعلیمی ادارے کو پورٹل سے حذف کر دیا گیا!');
   };
 
   const handleDeleteTransport = (id: string) => {
     setTransports((prev) => prev.filter((t) => t.id !== id));
+    deleteTransportFromFirestore(id).catch(() => {});
     showToastNotification('گاڑی کا ریکارڈ پورٹل سے حذف کر دیا گیا!');
   };
 
@@ -1310,20 +1505,31 @@ export default function App() {
       setDeletedMessagesArchive((prev) => [archiveItem, ...prev]);
     }
     setMessages((prev) => prev.filter((m) => m.id !== id));
+    deleteMessageFromFirestore(id).catch(() => {});
     showToastNotification('پیغام حذف کر دیا گیا اور آڈٹ والٹ میں محفوظ ہو گیا!');
   };
 
   // Super Admin Credentials Handlers
   const handleUpdateMosqueCredentials = (id: string, username: string, pass: string) => {
     setMosques((prev) =>
-      prev.map((m) => (m.id === id ? { ...m, username, password: pass } : m))
+      prev.map((m) => {
+        if (m.id !== id) return m;
+        const updated = { ...m, username, password: pass };
+        saveMosqueToFirestore(updated).catch(() => {});
+        return updated;
+      })
     );
     showToastNotification('مسجد کا لاگ ان پاس ورڈ تبدیل کر دیا گیا ہے!');
   };
 
   const handleUpdateInstituteCredentials = (id: string, username: string, pass: string) => {
     setInstitutes((prev) =>
-      prev.map((inst) => (inst.id === id ? { ...inst, username, password: pass } : inst))
+      prev.map((inst) => {
+        if (inst.id !== id) return inst;
+        const updated = { ...inst, username, password: pass };
+        saveInstituteToFirestore(updated).catch(() => {});
+        return updated;
+      })
     );
     showToastNotification('اسکول کا لاگ ان پاس ورڈ تبدیل کر دیا گیا ہے!');
   };
@@ -1339,6 +1545,7 @@ export default function App() {
       }
       return [transport, ...prev];
     });
+    saveTransportToFirestore(transport).catch(() => {});
     showToastNotification(`گاڑی "${transport.title}" محفوظ ہو گئی!`);
   };
 
@@ -1353,11 +1560,13 @@ export default function App() {
       }
       return [hospital, ...prev];
     });
+    saveHospitalToFirestore(hospital).catch(() => {});
     showToastNotification(`طبی سروس "${hospital.name}" محفوظ ہو گئی!`);
   };
 
   const handleDeleteHospital = (id: string) => {
     setHospitals((prev) => prev.filter((h) => h.id !== id));
+    deleteHospitalFromFirestore(id).catch(() => {});
     showToastNotification('ہسپتال/سروس کامیابی سے حذف کر دی گئی!');
   };
 
@@ -1490,93 +1699,580 @@ export default function App() {
     );
   };
 
-  const showToastNotification = (msg: string) => {
-    playNotificationChime('message');
+  const showToastNotification = (
+    msg: string,
+    options?: {
+      playSound?: boolean;
+      eventId?: string;
+      actionTarget?: {
+        messageId?: string;
+        recipientPhone?: string;
+        openNotifications?: boolean;
+      };
+    }
+  ) => {
+    if (options?.playSound !== false && notificationSettings.soundEnabled) {
+      void playNotificationChime('message', { eventId: options?.eventId });
+    }
+    if (toastTimerRef.current) {
+      clearTimeout(toastTimerRef.current);
+    }
     setToastMessage(msg);
-    setTimeout(() => {
+    setToastActionTarget(options?.actionTarget || null);
+    toastTimerRef.current = setTimeout(() => {
       setToastMessage(null);
-    }, 5000);
+      setToastActionTarget(null);
+    }, 6000);
   };
 
-  // Send Message with Profile Notification and Discussion Thread setup
-  const handleSendMessage = (
-    messageData: Omit<VillageMessage, 'id' | 'createdAt' | 'isRead'>
-  ) => {
-    const newMsg: VillageMessage = {
-      ...messageData,
-      id: `msg-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      isRead: false,
-      discussionThread: messageData.discussionThread || [],
-    };
-    setMessages((prev) => [newMsg, ...prev]);
+  // Real-time detector for newly arrived incoming messages & replies for the current user
+  const prevMessageSignaturesRef = useRef<Map<string, string>>(new Map());
+  const isInitialMessagesSnapshotRef = useRef<boolean>(true);
 
-    // Profile notification alert
-    showToastNotification(
-      `پیغام براہ راست ${messageData.targetProfileName} کے پروفائل میں پہنچ چکا ہے! وہ لاگ ان کر کے نجی جواب دے سکتے ہیں۔`
+  useEffect(() => {
+    const prevMap = prevMessageSignaturesRef.current;
+    const nextMap = new Map<string, string>();
+
+    messages.forEach((m) => {
+      const threadLen = m.discussionThread?.length || 0;
+      const lastReplyId =
+        threadLen > 0 ? m.discussionThread![threadLen - 1].id : m.replyCreatedAt || '';
+      const sig = `${m.id}_${threadLen}_${lastReplyId}`;
+      nextMap.set(m.id, sig);
+
+      if (isInitialMessagesSnapshotRef.current) return;
+
+      const prevSig = prevMap.get(m.id);
+      if (prevSig === sig) return; // No new message or reply on this thread
+
+      const isRecipient = isCurrentUserRecipientOfMessage(
+        m,
+        activeUserSession,
+        currentUserPhone,
+        matchedUserProfile?.id || null
+      );
+      const isSender = isCurrentUserSenderOfMessage(
+        m,
+        activeUserSession,
+        currentUserPhone,
+        matchedUserProfile?.id || null
+      );
+
+      // Case 1: Brand new message arrived for current user (and wasn't sent by current user)
+      if (!prevSig && isRecipient && !isSender) {
+        const eventId = `incoming_msg_${m.id}`;
+        if (notificationSettings.messageAlerts) {
+          if (notificationSettings.soundEnabled) {
+            void playNotificationChime('message', { eventId });
+          }
+          if (notificationSettings.inAppEnabled) {
+            showToastNotification(
+              `📩 نیا پیغام موصول ہوا: ${m.senderName} کی طرف سے "${(
+                m.messageText || ''
+              ).slice(0, 55)}" — دیکھنے کے لیے کلک کریں`,
+              {
+                playSound: false,
+                eventId,
+                actionTarget: {
+                  messageId: m.id,
+                  recipientPhone: m.targetMobile,
+                },
+              }
+            );
+          }
+          const incomingNotif: PortalNotificationItem = {
+            id: `notif-msg-${m.id}`,
+            recipientProfileId: m.targetProfileId,
+            recipientMobile: m.targetMobile,
+            recipientUid: m.recipientUid,
+            type: 'new_message',
+            title: `${m.senderName} کی طرف سے نیا پیغام`,
+            body: m.messageText || 'وائس میسج موصول ہوا ہے',
+            senderName: m.senderName,
+            senderMobile: m.senderMobile,
+            relatedMessageId: m.id,
+            relatedProfileId: m.targetProfileId,
+            createdAt: m.createdAt || new Date().toISOString(),
+            isRead: false,
+          };
+          void dispatchSystemPushNotification(incomingNotif, notificationSettings);
+        }
+      }
+
+      // Case 2: New reply added to an existing conversation where current user is the other participant
+      if (prevSig && prevSig !== sig && (isRecipient || isSender)) {
+        const latestItem =
+          m.discussionThread && m.discussionThread.length > 0
+            ? m.discussionThread[m.discussionThread.length - 1]
+            : null;
+        const replyRole = latestItem?.senderRole || m.lastSenderRole;
+        const replyForCurrentUser =
+          (replyRole === 'receiver' && isSender) ||
+          (replyRole === 'sender' && isRecipient) ||
+          (replyRole === 'admin' && (isSender || isRecipient));
+
+        if (replyForCurrentUser && notificationSettings.messageAlerts) {
+          const eventId = `incoming_reply_${m.id}_${latestItem?.id || Date.now()}`;
+          const replySenderName =
+            latestItem?.senderName ||
+            (replyRole === 'receiver' ? m.targetProfileName : m.senderName);
+          const replyPreview = latestItem?.text || m.replyText || 'نیا جواب موصول ہوا';
+
+          if (notificationSettings.soundEnabled) {
+            void playNotificationChime('message', { eventId });
+          }
+          if (notificationSettings.inAppEnabled) {
+            showToastNotification(
+              `💬 ${replySenderName} کا نیا جواب: "${replyPreview.slice(
+                0,
+                55
+              )}" — کھولنے کے لیے کلک کریں`,
+              {
+                playSound: false,
+                eventId,
+                actionTarget: {
+                  messageId: m.id,
+                  recipientPhone: isRecipient ? m.targetMobile : m.senderMobile,
+                },
+              }
+            );
+          }
+
+          const replyNotif: PortalNotificationItem = {
+            id: `notif-reply-${m.id}-${latestItem?.id || Date.now()}`,
+            recipientProfileId: isRecipient ? m.targetProfileId : m.senderProfileId,
+            recipientMobile: isRecipient ? m.targetMobile : m.senderMobile,
+            type: 'message_reply',
+            title: `${replySenderName} نے آپ کے پیغام کا جواب دیا`,
+            body: replyPreview,
+            senderName: replySenderName,
+            relatedMessageId: m.id,
+            createdAt: latestItem?.timestamp || new Date().toISOString(),
+            isRead: false,
+          };
+          void dispatchSystemPushNotification(replyNotif, notificationSettings);
+        }
+      }
+    });
+
+    prevMessageSignaturesRef.current = nextMap;
+    if (messages.length > 0) {
+      isInitialMessagesSnapshotRef.current = false;
+    }
+  }, [
+    messages,
+    activeUserSession,
+    currentUserPhone,
+    matchedUserProfile?.id,
+    notificationSettings,
+  ]);
+
+  // Listen for Service Worker notification clicks & URL query parameters (?open_message=...)
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    const openTargetMessage = (messageId?: string | null, phone?: string | null) => {
+      if (phone && phone !== 'user' && phone !== 'admin') {
+        setInboxPreselectedPhone(phone);
+      }
+      if (messageId) {
+        setInboxInitialMessageId(messageId);
+      }
+      setIsInboxModalOpen(true);
+    };
+
+    // Check URL query parameters on initial load
+    const params = new URLSearchParams(window.location.search);
+    const openMsgId = params.get('open_message');
+    const inboxParam = params.get('inbox');
+    if (openMsgId) {
+      openTargetMessage(openMsgId, inboxParam);
+      window.history.replaceState({}, '', window.location.pathname + window.location.hash);
+    }
+
+    const handleSwMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'RK_NOTIFICATION_CLICK') {
+        const data = event.data.data || {};
+        openTargetMessage(data.messageId, data.recipientMobile || data.recipientId);
+      }
+    };
+
+    const handleCustomNotifClick = (e: Event) => {
+      const detail = (e as CustomEvent).detail || {};
+      openTargetMessage(detail.messageId, detail.recipientMobile || detail.recipientId);
+    };
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleSwMessage);
+    }
+    window.addEventListener('rk-open-notification-target', handleCustomNotifClick);
+
+    return () => {
+      if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleSwMessage);
+      }
+      window.removeEventListener('rk-open-notification-target', handleCustomNotifClick);
+    };
+  }, []);
+
+  // Mark a message and its associated notifications as read for the current user
+  const handleMarkMessageRead = (messageId: string) => {
+    setMessages((prev) =>
+      prev.map((m) => {
+        if (m.id !== messageId) return m;
+        const isRecipient = isCurrentUserRecipientOfMessage(
+          m,
+          activeUserSession,
+          currentUserPhone,
+          matchedUserProfile?.id || null
+        );
+        const isSender = isCurrentUserSenderOfMessage(
+          m,
+          activeUserSession,
+          currentUserPhone,
+          matchedUserProfile?.id || null
+        );
+
+        const nextUnreadRecipient = isRecipient ? false : Boolean(m.unreadByRecipient);
+        const nextUnreadSender = isSender ? false : Boolean(m.unreadBySender);
+        const nextIsRead = isRecipient ? true : m.isRead;
+
+        if (
+          m.isRead === nextIsRead &&
+          Boolean(m.unreadByRecipient) === nextUnreadRecipient &&
+          Boolean(m.unreadBySender) === nextUnreadSender
+        ) {
+          return m;
+        }
+
+        const updated: VillageMessage = {
+          ...m,
+          isRead: nextIsRead,
+          readAt: new Date().toISOString(),
+          unreadByRecipient: nextUnreadRecipient,
+          unreadBySender: nextUnreadSender,
+          deliveryStatus: nextIsRead ? 'read' : m.deliveryStatus || 'delivered',
+        };
+        saveMessageToFirestore(updated).catch(() => {});
+        return updated;
+      })
+    );
+
+    // Also mark related notifications as read
+    setPortalNotifications((prev) =>
+      prev.map((n) => {
+        if (n.relatedMessageId !== messageId) return n;
+        if (n.isRead) return n;
+        const updatedNotif: PortalNotificationItem = {
+          ...n,
+          isRead: true,
+          readAt: new Date().toISOString(),
+        };
+        saveNotificationToFirestore(updatedNotif).catch(() => {});
+        return updatedNotif;
+      })
     );
   };
 
+  // Notification Center Actions
+  const handleMarkNotificationAsRead = (notifId: string) => {
+    const target = portalNotifications.find((n) => n.id === notifId);
+    if (!target) return;
+    if (target.isGlobal) {
+      markGlobalNotificationIdRead(currentUserNotifKey, notifId);
+    }
+    const nextReadKeys = Array.from(
+      new Set([...(target.readByKeys || []), currentUserNotifKey])
+    );
+    const updated: PortalNotificationItem = {
+      ...target,
+      isRead: target.isGlobal ? target.isRead : true,
+      readAt: new Date().toISOString(),
+      readByKeys: nextReadKeys,
+    };
+    setPortalNotifications((prev) => prev.map((n) => (n.id === notifId ? updated : n)));
+    saveNotificationToFirestore(updated).catch(() => {});
+    if (target.relatedMessageId) {
+      handleMarkMessageRead(target.relatedMessageId);
+    }
+  };
+
+  const handleMarkAllNotificationsAsRead = () => {
+    setPortalNotifications((prev) =>
+      prev.map((n) => {
+        if (!unreadNotificationIds.has(n.id)) return n;
+        if (n.isGlobal) {
+          markGlobalNotificationIdRead(currentUserNotifKey, n.id);
+        }
+        const nextReadKeys = Array.from(
+          new Set([...(n.readByKeys || []), currentUserNotifKey])
+        );
+        const updated: PortalNotificationItem = {
+          ...n,
+          isRead: n.isGlobal ? n.isRead : true,
+          readAt: new Date().toISOString(),
+          readByKeys: nextReadKeys,
+        };
+        saveNotificationToFirestore(updated).catch(() => {});
+        return updated;
+      })
+    );
+  };
+
+  const handleDeleteSingleNotification = (notifId: string) => {
+    const target = portalNotifications.find((n) => n.id === notifId);
+    markNotificationIdClearedLocally(currentUserNotifKey, notifId);
+    if (target && !target.isGlobal) {
+      deleteNotificationFromFirestore(notifId).catch(() => {});
+    }
+    setPortalNotifications((prev) => prev.filter((n) => n.id !== notifId));
+  };
+
+  const handleClearAllNotifications = () => {
+    userScopedNotifications.forEach((n) => {
+      markNotificationIdClearedLocally(currentUserNotifKey, n.id);
+      if (!n.isGlobal) {
+        deleteNotificationFromFirestore(n.id).catch(() => {});
+      }
+    });
+    const clearedIds = new Set(userScopedNotifications.map((n) => n.id));
+    setPortalNotifications((prev) => prev.filter((n) => !clearedIds.has(n.id)));
+  };
+
+  const handleSelectNotificationItem = (notif: PortalNotificationItem) => {
+    handleMarkNotificationAsRead(notif.id);
+    setIsNotificationCenterOpen(false);
+    if (notif.relatedMessageId) {
+      setInboxInitialMessageId(notif.relatedMessageId);
+      if (notif.recipientMobile) {
+        setInboxPreselectedPhone(notif.recipientMobile);
+      }
+      setIsInboxModalOpen(true);
+    } else if (notif.type === 'announcement') {
+      setIsNewsPopupOpen(true);
+    } else if (notif.type === 'emergency_alert') {
+      navigateToFooterPage('emergency');
+    } else if (notif.relatedProfileId) {
+      const prof = profiles.find((p) => p.id === notif.relatedProfileId);
+      if (prof) setSelectedProfile(prof);
+    }
+  };
+
+  // Send Message with Profile Notification, Firestore verification, and Discussion Thread setup
+  const handleSendMessage = async (
+    messageData: Omit<VillageMessage, 'id' | 'createdAt' | 'isRead'>
+  ): Promise<boolean> => {
+    const nowIso = new Date().toISOString();
+    const msgId = `msg-${Date.now()}`;
+    const newMsg: VillageMessage = {
+      ...messageData,
+      id: msgId,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+      isRead: false,
+      unreadByRecipient: true,
+      unreadBySender: false,
+      deliveryStatus: 'sending',
+      lastMessagePreview: messageData.messageText,
+      lastSenderRole: 'sender',
+      discussionThread: messageData.discussionThread || [],
+    };
+
+    // Prevent duplicate messages if user double-taps within 2 seconds
+    const isDuplicate = messages.some(
+      (existing) =>
+        existing.targetProfileId === newMsg.targetProfileId &&
+        phonesMatch(existing.senderMobile, newMsg.senderMobile) &&
+        existing.messageText === newMsg.messageText &&
+        Date.now() - new Date(existing.createdAt).getTime() < 3000
+    );
+    if (isDuplicate) {
+      return true;
+    }
+
+    setMessages((prev) => [newMsg, ...prev]);
+
+    // Remember sender's phone locally if not already set so they receive reply alerts automatically
+    if (!currentUserPhone && messageData.senderMobile) {
+      setCurrentUserPhone(messageData.senderMobile);
+      localStorage.setItem(STORAGE_CURRENT_USER_PHONE_KEY, messageData.senderMobile);
+    }
+
+    const savedOk = await saveMessageToFirestore({
+      ...newMsg,
+      deliveryStatus: 'delivered',
+    });
+
+    if (!savedOk) {
+      setMessages((prev) =>
+        prev.map((m) => (m.id === msgId ? { ...m, deliveryStatus: 'failed' } : m))
+      );
+      return false;
+    }
+
+    const deliveredMsg: VillageMessage = {
+      ...newMsg,
+      deliveryStatus: 'delivered',
+    };
+    setMessages((prev) => prev.map((m) => (m.id === msgId ? deliveredMsg : m)));
+
+    // Create persistent real-time notification document for the recipient
+    const newNotif: PortalNotificationItem = {
+      id: `notif-msg-${msgId}`,
+      recipientProfileId: newMsg.targetProfileId,
+      recipientMobile: newMsg.targetMobile,
+      recipientUid: newMsg.recipientUid,
+      type: 'new_message',
+      title: `${newMsg.senderName} کی طرف سے نیا پیغام`,
+      body: newMsg.messageText || 'وائس میسج موصول ہوا ہے',
+      senderName: newMsg.senderName,
+      senderMobile: newMsg.senderMobile,
+      relatedMessageId: msgId,
+      relatedProfileId: newMsg.targetProfileId,
+      createdAt: nowIso,
+      isRead: false,
+    };
+    setPortalNotifications((prev) => [newNotif, ...prev]);
+    saveNotificationToFirestore(newNotif).catch(() => {});
+
+    // Trigger email notification hook if recipient has email
+    const targetProf = profiles.find((p) => p.id === newMsg.targetProfileId);
+    if (targetProf) {
+      dispatchMessageNotificationEmail({
+        recipientProfile: targetProf,
+        message: deliveredMsg,
+      }).catch(() => {});
+    }
+
+    showToastNotification(
+      `پیغام براہ راست ${messageData.targetProfileName} کے ان باکس میں پہنچ چکا ہے!`,
+      {
+        eventId: `sent_${msgId}`,
+        actionTarget: {
+          messageId: msgId,
+          recipientPhone: newMsg.senderMobile,
+        },
+      }
+    );
+    return true;
+  };
+
+  // Retry sending a failed message from InboxModal
+  const handleRetrySendMessage = async (msg: VillageMessage): Promise<boolean> => {
+    const retrying: VillageMessage = {
+      ...msg,
+      deliveryStatus: 'delivered',
+      updatedAt: new Date().toISOString(),
+    };
+    const ok = await saveMessageToFirestore(retrying);
+    if (ok) {
+      setMessages((prev) => prev.map((m) => (m.id === msg.id ? retrying : m)));
+      showToastNotification('پیغام کامیابی سے دوبارہ ارسال ہو گیا!');
+      return true;
+    }
+    showToastNotification('پیغام ابھی بھی ارسال نہیں ہو سکا۔ انٹرنیٹ چیک کریں۔');
+    return false;
+  };
+
   // 2-Way Continuous Discussion Thread Reply Handler
-  const handleReplyDiscussion = (
+  const handleReplyDiscussion = async (
     messageId: string,
     replyText: string,
     audioData?: string,
     audioDuration?: number
-  ) => {
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id !== messageId) return m;
+  ): Promise<boolean> => {
+    const targetMsg = messages.find((m) => m.id === messageId);
+    if (!targetMsg) return false;
 
-        const isUserReceiver =
-          (activeUserSession && activeUserSession.profileId === m.targetProfileId) ||
-          (activeUserSession &&
-            activeUserSession.mobile &&
-            activeUserSession.mobile.replace(/\D/g, '') === m.targetMobile.replace(/\D/g, ''));
-
-        const isUserAdmin = activeUserSession?.type === 'admin';
-
-        const role: 'receiver' | 'sender' | 'admin' = isUserAdmin
-          ? 'admin'
-          : isUserReceiver
-          ? 'receiver'
-          : 'sender';
-
-        const senderName =
-          activeUserSession?.name ||
-          (role === 'receiver' ? m.targetProfileName : m.senderName);
-
-        const senderMobile =
-          activeUserSession?.mobile ||
-          (role === 'receiver' ? m.targetMobile : m.senderMobile);
-
-        const newReplyItem: ChatDiscussionItem = {
-          id: `reply-${Date.now()}`,
-          senderRole: role,
-          senderName,
-          senderMobile,
-          text: replyText,
-          audioData,
-          audioDurationSeconds: audioDuration,
-          timestamp: new Date().toISOString(),
-        };
-
-        const existingThread = m.discussionThread || [];
-        return {
-          ...m,
-          replyText,
-          replyCreatedAt: new Date().toISOString(),
-          discussionThread: [...existingThread, newReplyItem],
-        };
-      })
+    const isUserReceiver = isCurrentUserRecipientOfMessage(
+      targetMsg,
+      activeUserSession,
+      currentUserPhone,
+      matchedUserProfile?.id || null
     );
+    const isUserAdmin = activeUserSession?.type === 'admin';
 
-    showToastNotification('خفیہ گفتگو میں آپ کا جواب ارسال ہو گیا ہے!');
+    const role: 'receiver' | 'sender' | 'admin' = isUserAdmin
+      ? 'admin'
+      : isUserReceiver
+      ? 'receiver'
+      : 'sender';
+
+    const senderName =
+      activeUserSession?.name ||
+      (role === 'receiver' ? targetMsg.targetProfileName : targetMsg.senderName);
+
+    const senderMobile =
+      activeUserSession?.mobile ||
+      (role === 'receiver' ? targetMsg.targetMobile : targetMsg.senderMobile);
+
+    const nowIso = new Date().toISOString();
+    const replyId = `reply-${Date.now()}`;
+    const newReplyItem: ChatDiscussionItem = {
+      id: replyId,
+      senderRole: role,
+      senderName,
+      senderMobile,
+      text: replyText,
+      audioData,
+      audioDurationSeconds: audioDuration,
+      timestamp: nowIso,
+      isRead: false,
+    };
+
+    const existingThread = targetMsg.discussionThread || [];
+    const updatedMsg: VillageMessage = {
+      ...targetMsg,
+      replyText,
+      replyCreatedAt: nowIso,
+      updatedAt: nowIso,
+      isRead: role === 'sender' ? false : targetMsg.isRead,
+      unreadByRecipient: role === 'sender',
+      unreadBySender: role === 'receiver' || role === 'admin',
+      deliveryStatus: 'delivered',
+      lastMessagePreview: replyText,
+      lastSenderRole: role,
+      discussionThread: [...existingThread, newReplyItem],
+    };
+
+    setMessages((prev) => prev.map((m) => (m.id === messageId ? updatedMsg : m)));
+    const ok = await saveMessageToFirestore(updatedMsg);
+    if (!ok) {
+      return false;
+    }
+
+    // Create real-time notification for the other participant in this conversation
+    const recipientProfileId =
+      role === 'sender' ? targetMsg.targetProfileId : targetMsg.senderProfileId;
+    const recipientMobile =
+      role === 'sender' ? targetMsg.targetMobile : targetMsg.senderMobile;
+
+    const replyNotif: PortalNotificationItem = {
+      id: `notif-reply-${messageId}-${replyId}`,
+      recipientProfileId,
+      recipientMobile,
+      type: 'message_reply',
+      title: `${senderName} نے گفتگو میں جواب بھیجا`,
+      body: replyText,
+      senderName,
+      senderMobile,
+      relatedMessageId: messageId,
+      relatedProfileId: targetMsg.targetProfileId,
+      createdAt: nowIso,
+      isRead: false,
+    };
+    setPortalNotifications((prev) => [replyNotif, ...prev]);
+    saveNotificationToFirestore(replyNotif).catch(() => {});
+
+    showToastNotification('خفیہ گفتگو میں آپ کا جواب ارسال ہو گیا ہے!', {
+      eventId: `reply_sent_${replyId}`,
+    });
+    return true;
   };
 
   // Backward compatibility forwarder
   const handleReplyMessage = (messageId: string, replyText: string) => {
-    handleReplyDiscussion(messageId, replyText);
+    void handleReplyDiscussion(messageId, replyText);
   };
 
   // PART C2 & C3: Per-side Soft-Delete Message (persisted to Firestore; hard-deletes ONLY when both sides delete AND message is not reported)
@@ -1732,12 +2428,18 @@ export default function App() {
   // Admin Actions for Profiles
   const handleToggleVerifyProfile = (id: string) => {
     setProfiles((prev) =>
-      prev.map((p) => (p.id === id ? { ...p, isVerified: !p.isVerified } : p))
+      prev.map((p) => {
+        if (p.id !== id) return p;
+        const updated = { ...p, isVerified: !p.isVerified };
+        saveProfileToFirestore(updated).catch(() => {});
+        return updated;
+      })
     );
   };
 
   const handleDeleteProfile = (id: string) => {
     setProfiles((prev) => prev.filter((p) => p.id !== id));
+    deleteProfileFromFirestore(id).catch(() => {});
     if (selectedProfile && selectedProfile.id === id) {
       setSelectedProfile(null);
     }
@@ -1751,6 +2453,11 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    void dissociatePushSubscriptionOnLogout({
+      session: activeUserSession,
+      currentUserPhone,
+      matchedProfileId: matchedUserProfile?.id || null,
+    });
     setActiveUserSession(null);
     localStorage.removeItem(STORAGE_ACTIVE_SESSION_KEY);
     showToastNotification('You have signed out successfully.');
@@ -1839,23 +2546,44 @@ export default function App() {
       setBannerImagesVersion((v) => v + 1);
     }
     setNewsEvents((prev) => [newEv, ...prev]);
+    saveNewsEventToFirestore(newEv).catch(() => {});
+
+    // Broadcast announcement notification to all villagers
+    const announcementNotif: PortalNotificationItem = {
+      id: `notif-ann-${newId}`,
+      isGlobal: true,
+      type: 'announcement',
+      title: `📢 گاؤں کا اہم اعلان: ${newEv.title}`,
+      body: newEv.content,
+      senderName: newEv.author,
+      createdAt: newEv.createdAt,
+      isRead: false,
+    };
+    setPortalNotifications((prev) => [announcementNotif, ...prev]);
+    saveNotificationToFirestore(announcementNotif).catch(() => {});
   };
 
   const handleUpdateNewsEvent = (updatedEv: VillageNewsEvent) => {
     setNewsEvents((prev) => prev.map((ev) => (ev.id === updatedEv.id ? updatedEv : ev)));
+    saveNewsEventToFirestore(updatedEv).catch(() => {});
     setBannerImagesVersion((v) => v + 1);
   };
 
   const handleDeleteNewsEvent = (id: string) => {
     setNewsEvents((prev) => prev.filter((ev) => ev.id !== id));
+    deleteNewsEventFromFirestore(id).catch(() => {});
+    deleteBannerSlideImageDoc(id).catch(() => {});
     setBannerImagesVersion((v) => v + 1);
   };
 
   const handleTogglePopupNewsEvent = (id: string) => {
     setNewsEvents((prev) =>
-      prev.map((ev) =>
-        ev.id === id ? { ...ev, isPopupOnLaunch: !ev.isPopupOnLaunch } : ev
-      )
+      prev.map((ev) => {
+        if (ev.id !== id) return ev;
+        const updated = { ...ev, isPopupOnLaunch: !ev.isPopupOnLaunch };
+        saveNewsEventToFirestore(updated).catch(() => {});
+        return updated;
+      })
     );
   };
 
@@ -2003,10 +2731,10 @@ export default function App() {
     return (
       <div
         key={profile.id}
-        className="bg-white rounded-3xl border border-stone-200 shadow-sm overflow-hidden flex flex-col justify-between h-full relative"
+        className="bg-white rounded-3xl border border-stone-200/90 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col justify-between h-full relative"
       >
         {/* Card Media Header */}
-        <div className="relative h-36 bg-stone-900 overflow-hidden">
+        <div className="relative h-36 sm:h-40 bg-stone-900 overflow-hidden shrink-0">
           {profile.businessImage ? (
             <img
               src={profile.businessImage}
@@ -2014,12 +2742,12 @@ export default function App() {
               className="w-full h-full object-cover opacity-90"
             />
           ) : (
-            <div className="w-full h-full bg-gradient-to-r from-emerald-950 to-stone-900 flex items-center justify-center text-white/30">
+            <div className="w-full h-full bg-gradient-to-r from-emerald-950 via-teal-950 to-stone-900 flex items-center justify-center text-white/25">
               <Briefcase className="w-10 h-10" />
             </div>
           )}
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-black/30" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/25" />
 
           {/* Notification Badge if messages arrived for this profile */}
           {profileUnread > 0 && (
@@ -2030,26 +2758,26 @@ export default function App() {
             </div>
           )}
 
-          {/* Person Avatar overlay */}
-          <div className="absolute bottom-2.5 right-3 flex items-end gap-2.5 z-10">
-            <div className="relative">
+          {/* Person Avatar & Name overlay with left-3 right-3 bounds to prevent overflow */}
+          <div className="absolute bottom-2.5 right-3 left-3 flex items-end gap-2.5 z-10 min-w-0">
+            <div className="relative shrink-0">
               <img
                 src={profile.personImage}
                 alt={profile.name}
-                className="w-14 h-14 rounded-2xl object-cover border-2 border-amber-400 shadow-lg bg-stone-800"
+                className="w-14 h-14 rounded-full object-cover border-2 border-amber-400 shadow-lg bg-stone-800"
               />
               {profile.isVerified && (
-                <div className="absolute -bottom-1 -right-1 bg-amber-400 rounded-full p-0.5 shadow">
+                <div className="absolute -bottom-0.5 -right-0.5 bg-amber-400 rounded-full p-0.5 shadow">
                   <ShieldCheck className="w-3.5 h-3.5 text-stone-950 fill-amber-400" />
                 </div>
               )}
             </div>
 
-            <div className="text-white drop-shadow">
-              <h4 className="font-bold text-base font-nastaliq leading-tight text-amber-200">
+            <div className="text-white drop-shadow min-w-0 flex-1">
+              <h4 className="font-bold text-base font-nastaliq leading-relaxed text-amber-200 truncate">
                 {profile.name}
               </h4>
-              <span className="text-[11px] text-stone-200 font-semibold block">
+              <span className="text-xs text-stone-200 font-semibold block leading-relaxed truncate">
                 {profile.businessName}
               </span>
             </div>
@@ -2058,10 +2786,10 @@ export default function App() {
           {/* Audio button on card */}
           <button
             onClick={() => handleSpeakCard(profile)}
-            className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer ${
+            className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer transition ${
               activeCardAudioId === profile.id
                 ? 'bg-red-600 animate-voice-pulse'
-                : 'bg-black/50 hover:bg-black/70'
+                : 'bg-black/50 hover:bg-black/75'
             }`}
             title="تفصیل سنیں 🔊"
           >
@@ -2073,113 +2801,118 @@ export default function App() {
           </button>
 
           {/* Category pill */}
-          <div className="absolute top-2.5 left-2.5 z-10">
-            <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-800/90 text-white backdrop-blur shadow">
+          <div className="absolute top-2.5 left-2.5 z-10 max-w-[65%]">
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-800/90 text-white backdrop-blur shadow block truncate">
               {cats[profile.category] || profile.category}
             </span>
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between">
-          {/* Business Dedicated Operating Hours, Break & Live Status Badge */}
-          <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
-            <div className="flex items-center justify-between gap-1 flex-wrap">
-              <div className="flex items-center gap-1.5">
-                <span className={`w-2.5 h-2.5 rounded-full ${opStatus.dotClass}`} />
-                <span
-                  className={`text-xs font-bold ${
-                    opStatus.color === 'emerald'
-                      ? 'text-emerald-800'
-                      : opStatus.color === 'amber'
-                      ? 'text-amber-800'
-                      : 'text-rose-800'
-                  }`}
-                >
-                  {opStatus.statusTextUrdu}
+        <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between min-w-0">
+          <div className="space-y-2.5 min-w-0">
+            {/* Business Dedicated Operating Hours, Break & Live Status Badge */}
+            <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
+              <div className="flex items-center justify-between gap-1.5 flex-wrap">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opStatus.dotClass}`} />
+                  <span
+                    className={`text-xs font-bold ${
+                      opStatus.color === 'emerald'
+                        ? 'text-emerald-800'
+                        : opStatus.color === 'amber'
+                        ? 'text-amber-800'
+                        : 'text-rose-800'
+                    }`}
+                  >
+                    {opStatus.statusTextUrdu}
+                  </span>
+                  <span className="text-[10px] text-stone-500 font-mono">({opStatus.statusTextEnglish})</span>
+                </div>
+
+                <span className="text-[11px] font-bold text-stone-700 bg-white px-2 py-0.5 rounded-lg border border-stone-200 font-mono shadow-2xs" dir="ltr">
+                  ⏰ {opStatus.openingTime} – {opStatus.closingTime}
                 </span>
-                <span className="text-[10px] text-stone-500 font-mono">({opStatus.statusTextEnglish})</span>
               </div>
 
-              <span className="text-[11px] font-bold text-stone-700 bg-white px-2 py-0.5 rounded-lg border border-stone-200 font-mono shadow-2xs">
-                ⏰ {opStatus.openingTime} – {opStatus.closingTime}
+              <div className="flex items-center justify-between gap-1 text-[11px] text-stone-600 pt-1 border-t border-stone-200/60 flex-wrap">
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-amber-600 shrink-0" />
+                  <span>دوپہر وقفہ / لنچ بریک:</span>
+                </span>
+                <span className="font-mono font-bold text-amber-950 bg-amber-100/70 px-2 py-0.5 rounded-md border border-amber-200/50" dir="ltr">
+                  {opStatus.breakTime}
+                </span>
+              </div>
+            </div>
+
+            {/* Rate & Address */}
+            <div className="flex items-center justify-between gap-2 text-xs bg-amber-50/70 p-2 rounded-xl border border-amber-200/60 font-nastaliq">
+              <div className="flex items-center gap-1 font-bold text-amber-950 min-w-0 flex-1">
+                <span className="shrink-0">ریٹ:</span>
+                <span className="truncate">{profile.chargesDescription || 'کام کے مطابق طے شدہ'}</span>
+              </div>
+              <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-1.5 py-0.5 rounded shrink-0">
+                رتہ کلاں
               </span>
             </div>
 
-            <div className="flex items-center justify-between text-[11px] text-stone-600 pt-1 border-t border-stone-200/60">
-              <span className="flex items-center gap-1">
-                <Clock className="w-3 h-3 text-amber-600" />
-                <span>دوپہر وقفہ / لنچ بریک:</span>
-              </span>
-              <span className="font-mono font-bold text-amber-950 bg-amber-100/70 px-2 py-0.5 rounded-md border border-amber-200/50">
-                {opStatus.breakTime}
-              </span>
+            <div className="text-xs text-stone-600 flex items-start gap-1.5 min-w-0">
+              <MapPin className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-1" />
+              <span className="line-clamp-1 break-words">{profile.address}</span>
             </div>
-          </div>
-          {/* Rate & Address */}
-          <div className="flex items-center justify-between text-xs bg-amber-50/70 p-2 rounded-xl border border-amber-200/60 font-nastaliq">
-            <div className="flex items-center gap-1 font-bold text-amber-950">
-              <span>ریٹ:</span>
-              <span>{profile.chargesDescription || 'کام کے مطابق طے شدہ'}</span>
-            </div>
-            <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100 px-1.5 py-0.5 rounded">
-              رتہ کلاں
-            </span>
-          </div>
-
-          <div className="text-xs text-stone-600 flex items-start gap-1">
-            <MapPin className="w-3.5 h-3.5 text-emerald-700 shrink-0 mt-0.5" />
-            <span className="line-clamp-1">{profile.address}</span>
           </div>
 
           {/* Action buttons: Mobile thumb-friendly */}
-          <div className="pt-1 grid grid-cols-3 gap-1.5 font-nastaliq">
-            <a
-              href={`tel:${profile.mobile}`}
-              className="py-2 px-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
-            >
-              <Phone className="w-3.5 h-3.5" />
-              <span>کال</span>
-            </a>
+          <div className="space-y-1.5 pt-1 font-nastaliq">
+            <div className="grid grid-cols-3 gap-1.5">
+              <a
+                href={`tel:${profile.mobile}`}
+                className="min-h-[40px] py-2 px-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
+              >
+                <Phone className="w-3.5 h-3.5 shrink-0" />
+                <span>کال</span>
+              </a>
 
-            <a
-              href={`https://wa.me/${whatsappClean}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="py-2 px-2 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
-            >
-              <MessageCircle className="w-3.5 h-3.5" />
-              <span>واٹس ایپ</span>
-            </a>
+              <a
+                href={`https://wa.me/${whatsappClean}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="min-h-[40px] py-2 px-2 rounded-xl bg-green-600 hover:bg-green-700 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
+              >
+                <MessageCircle className="w-3.5 h-3.5 shrink-0" />
+                <span>واٹس ایپ</span>
+              </a>
 
-            <button
-              onClick={() => setMessageTargetProfile(profile)}
-              className="py-2 px-2 rounded-xl bg-amber-400 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95 cursor-pointer"
-            >
-              <Send className="w-3.5 h-3.5" />
-              <span>میسج</span>
-            </button>
-          </div>
+              <button
+                onClick={() => setMessageTargetProfile(profile)}
+                className="min-h-[40px] py-2 px-2 rounded-xl bg-amber-400 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95 cursor-pointer"
+              >
+                <Send className="w-3.5 h-3.5 shrink-0" />
+                <span>میسج</span>
+              </button>
+            </div>
 
-          <div className="flex items-center gap-1.5">
-            <button
-              onClick={() => setSelectedProfile(profile)}
-              className="flex-1 py-2 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-200 flex items-center justify-center gap-1 transition cursor-pointer font-nastaliq"
-            >
-              <Eye className="w-3.5 h-3.5 text-stone-600" />
-              <span>مکمل تفصیل</span>
-            </button>
-            <button
-              onClick={(e) => {
-                e.stopPropagation();
-                handleRequestEditProfile(profile);
-              }}
-              className="px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer font-nastaliq shadow-2xs"
-              title="پروفائل ایڈٹ کریں (پاس ورڈ سے محفوظ)"
-            >
-              <Edit className="w-3.5 h-3.5 text-emerald-700" />
-              <span>ایڈٹ</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => setSelectedProfile(profile)}
+                className="min-h-[40px] flex-1 py-2 px-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-200 flex items-center justify-center gap-1 transition cursor-pointer font-nastaliq"
+              >
+                <Eye className="w-3.5 h-3.5 text-stone-600 shrink-0" />
+                <span>مکمل تفصیل</span>
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleRequestEditProfile(profile);
+                }}
+                className="min-h-[40px] px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-bold text-xs flex items-center justify-center gap-1 transition cursor-pointer font-nastaliq shadow-2xs shrink-0"
+                title="پروفائل ایڈٹ کریں (پاس ورڈ سے محفوظ)"
+              >
+                <Edit className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                <span>ایڈٹ</span>
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -2189,46 +2922,58 @@ export default function App() {
   const renderHospitalCard = (hosp: VillageHospital) => {
     const isPlaying = activeCardAudioId === hosp.id;
     return (
-      <div key={hosp.id} className="bg-white rounded-3xl border-2 border-red-300 p-4 shadow-sm space-y-3 font-nastaliq">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-10 h-10 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center font-bold">
-              <HeartPulse className="w-5 h-5 animate-pulse" />
-            </div>
-            <div>
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <h4 className="font-bold text-base text-stone-900">{hosp.name}</h4>
-                <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold">
-                  {hosp.categoryUrdu}
-                </span>
+      <div
+        key={hosp.id}
+        className="bg-white rounded-3xl border-2 border-red-300 p-4 shadow-sm flex flex-col justify-between gap-3 h-full font-nastaliq"
+      >
+        <div className="space-y-3 min-w-0">
+          <div className="flex items-start justify-between gap-2">
+            <div className="flex items-center gap-2.5 min-w-0 flex-1">
+              <div className="w-11 h-11 rounded-2xl bg-red-100 text-red-600 flex items-center justify-center font-bold shrink-0">
+                <HeartPulse className="w-5 h-5 animate-pulse" />
               </div>
-              <span className="text-xs text-stone-500">اوقات: {hosp.timing}</span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <h4 className="font-bold text-base text-stone-900 break-words">{hosp.name}</h4>
+                  <span className="text-[10px] bg-red-600 text-white px-2 py-0.5 rounded-full font-bold shrink-0">
+                    {hosp.categoryUrdu}
+                  </span>
+                </div>
+                <span className="text-xs text-stone-500 block">اوقات: {hosp.timing}</span>
+              </div>
             </div>
+
+            <button
+              onClick={() => handleSpeakHospital(hosp)}
+              className={`p-2 rounded-xl text-xs font-bold transition shadow shrink-0 cursor-pointer ${
+                isPlaying ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-red-100'
+              }`}
+              title="آواز سنیں 🔊"
+            >
+              {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-red-600" />}
+            </button>
           </div>
 
-          <button
-            onClick={() => handleSpeakHospital(hosp)}
-            className={`p-2 rounded-xl text-xs font-bold transition shadow ${
-              isPlaying ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-red-100'
-            }`}
-            title="آواز سنیں 🔊"
-          >
-            {isPlaying ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-red-600" />}
-          </button>
-        </div>
-
-        <div className="text-xs text-stone-600 flex items-center justify-between bg-stone-50 p-2.5 rounded-2xl border border-stone-200">
-          <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-red-600" />{hosp.address} ({hosp.distance})</span>
-          {hosp.is24Hours && <span className="text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-md">24 گھنٹے</span>}
+          <div className="text-xs text-stone-600 flex items-center justify-between gap-2 bg-stone-50 p-2.5 rounded-2xl border border-stone-200 flex-wrap">
+            <span className="flex items-center gap-1 min-w-0">
+              <MapPin className="w-3.5 h-3.5 text-red-600 shrink-0" />
+              <span className="truncate">{hosp.address} ({hosp.distance})</span>
+            </span>
+            {hosp.is24Hours && (
+              <span className="text-emerald-700 font-bold bg-emerald-100 px-2 py-0.5 rounded-md shrink-0">
+                24 گھنٹے
+              </span>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 pt-1">
           <a
             href={`tel:${hosp.contact.replace(/\D/g, '')}`}
-            className="flex-1 py-2 px-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
+            className="min-h-[42px] flex-1 py-2 px-3 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition active:scale-95"
           >
-            <Phone className="w-3.5 h-3.5" />
-            <span>فوری کال: {hosp.contact}</span>
+            <Phone className="w-3.5 h-3.5 shrink-0" />
+            <span>فوری کال: <span className="font-mono" dir="ltr">{hosp.contact}</span></span>
           </a>
         </div>
       </div>
@@ -2236,39 +2981,55 @@ export default function App() {
   };
 
   const renderMosqueCard = (m: VillageMosque) => (
-    <div key={m.id} className="bg-white rounded-3xl border border-emerald-200 p-4 shadow-sm space-y-3 font-nastaliq">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold">
-            <Compass className="w-5 h-5" />
+    <div
+      key={m.id}
+      className="bg-white rounded-3xl border border-emerald-200 p-4 shadow-sm flex flex-col justify-between gap-3 h-full font-nastaliq"
+    >
+      <div className="space-y-3 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {m.image ? (
+              <img
+                src={m.image}
+                alt={m.name}
+                className="w-12 h-12 rounded-2xl object-cover border border-emerald-300 shrink-0 bg-emerald-950"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center font-bold shrink-0">
+                <Compass className="w-5 h-5" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h4 className="font-bold text-base text-stone-900 truncate">{m.name}</h4>
+              <span className="text-xs text-stone-500 block truncate">خطیب: {m.imamName}</span>
+            </div>
           </div>
-          <div>
-            <h4 className="font-bold text-base text-stone-900">{m.name}</h4>
-            <span className="text-xs text-stone-500">خطیب: {m.imamName}</span>
-          </div>
+          <button
+            onClick={() => handleSpeakMosque(m)}
+            className={`p-2 rounded-xl text-xs font-bold transition shadow shrink-0 cursor-pointer ${
+              activeCardAudioId === m.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-emerald-100'
+            }`}
+            title="آواز سنیں 🔊"
+          >
+            {activeCardAudioId === m.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-700" />}
+          </button>
         </div>
-        <button
-          onClick={() => handleSpeakMosque(m)}
-          className={`p-2 rounded-xl text-xs font-bold transition shadow ${
-            activeCardAudioId === m.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-emerald-100'
-          }`}
-          title="آواز سنیں 🔊"
-        >
-          {activeCardAudioId === m.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-emerald-700" />}
-        </button>
+
+        <div className="grid grid-cols-5 gap-1 text-[11px] text-center bg-emerald-50/70 p-2 rounded-2xl border border-emerald-200 font-mono">
+          <div className="min-w-0"><span className="block text-[9px] font-nastaliq text-stone-500">فجر</span><strong className="text-emerald-950 block truncate">{m.prayerTimes?.fajr || '05:15'}</strong></div>
+          <div className="min-w-0"><span className="block text-[9px] font-nastaliq text-stone-500">ظہر</span><strong className="text-emerald-950 block truncate">{m.prayerTimes?.dhuhr || '01:30'}</strong></div>
+          <div className="min-w-0"><span className="block text-[9px] font-nastaliq text-stone-500">عصر</span><strong className="text-emerald-950 block truncate">{m.prayerTimes?.asr || '05:00'}</strong></div>
+          <div className="min-w-0"><span className="block text-[9px] font-nastaliq text-stone-500">مغرب</span><strong className="text-emerald-950 block truncate">{m.prayerTimes?.maghrib || '06:40'}</strong></div>
+          <div className="min-w-0"><span className="block text-[9px] font-nastaliq text-stone-500">عشاء</span><strong className="text-emerald-950 block truncate">{m.prayerTimes?.isha || '08:15'}</strong></div>
+        </div>
       </div>
 
-      <div className="grid grid-cols-5 gap-1 text-[11px] text-center bg-emerald-50/70 p-2 rounded-2xl border border-emerald-200 font-mono">
-        <div><span className="block text-[9px] font-nastaliq text-stone-500">فجر</span><strong className="text-emerald-950">{m.prayerTimes?.fajr || '05:15'}</strong></div>
-        <div><span className="block text-[9px] font-nastaliq text-stone-500">ظہر</span><strong className="text-emerald-950">{m.prayerTimes?.dhuhr || '01:30'}</strong></div>
-        <div><span className="block text-[9px] font-nastaliq text-stone-500">عصر</span><strong className="text-emerald-950">{m.prayerTimes?.asr || '05:00'}</strong></div>
-        <div><span className="block text-[9px] font-nastaliq text-stone-500">مغرب</span><strong className="text-emerald-950">{m.prayerTimes?.maghrib || '06:40'}</strong></div>
-        <div><span className="block text-[9px] font-nastaliq text-stone-500">عشاء</span><strong className="text-emerald-950">{m.prayerTimes?.isha || '08:15'}</strong></div>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-stone-600 pt-1">
-        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-red-500" />{m.location}</span>
-        <button onClick={() => setIsMosquesModalOpen(true)} className="text-emerald-700 font-bold hover:underline cursor-pointer">
+      <div className="flex items-center justify-between gap-2 text-xs text-stone-600 pt-1">
+        <span className="flex items-center gap-1 min-w-0 flex-1">
+          <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0" />
+          <span className="truncate">{m.location}</span>
+        </span>
+        <button onClick={() => setIsMosquesModalOpen(true)} className="text-emerald-700 font-bold hover:underline cursor-pointer shrink-0">
           تمام اوقات دیکھیں ➔
         </button>
       </div>
@@ -2276,36 +3037,52 @@ export default function App() {
   );
 
   const renderInstituteCard = (inst: VillageInstitute) => (
-    <div key={inst.id} className="bg-white rounded-3xl border border-blue-200 p-4 shadow-sm space-y-3 font-nastaliq">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-2xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold">
-            <GraduationCap className="w-5 h-5" />
+    <div
+      key={inst.id}
+      className="bg-white rounded-3xl border border-blue-200 p-4 shadow-sm flex flex-col justify-between gap-3 h-full font-nastaliq"
+    >
+      <div className="space-y-3 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {inst.image ? (
+              <img
+                src={inst.image}
+                alt={inst.name}
+                className="w-12 h-12 rounded-2xl object-cover border border-blue-300 shrink-0 bg-blue-950"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-800 flex items-center justify-center font-bold shrink-0">
+                <GraduationCap className="w-5 h-5" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h4 className="font-bold text-base text-stone-900 truncate">{inst.name}</h4>
+              <span className="text-xs text-stone-500 block truncate">ہیڈ ماسٹر: {inst.headName}</span>
+            </div>
           </div>
-          <div>
-            <h4 className="font-bold text-base text-stone-900">{inst.name}</h4>
-            <span className="text-xs text-stone-500">ہیڈ ماسٹر: {inst.headName}</span>
-          </div>
+          <button
+            onClick={() => handleSpeakInstitute(inst)}
+            className={`p-2 rounded-xl text-xs font-bold transition shadow shrink-0 cursor-pointer ${
+              activeCardAudioId === inst.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-blue-100'
+            }`}
+            title="آواز سنیں 🔊"
+          >
+            {activeCardAudioId === inst.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-blue-700" />}
+          </button>
         </div>
-        <button
-          onClick={() => handleSpeakInstitute(inst)}
-          className={`p-2 rounded-xl text-xs font-bold transition shadow ${
-            activeCardAudioId === inst.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-blue-100'
-          }`}
-          title="آواز سنیں 🔊"
-        >
-          {activeCardAudioId === inst.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-blue-700" />}
-        </button>
+
+        <div className="text-xs text-stone-700 bg-blue-50/60 p-2.5 rounded-2xl border border-blue-100 space-y-1">
+          <div className="truncate"><strong>کلاسیں:</strong> {inst.classesOffered}</div>
+          <div className="truncate"><strong>اوقات:</strong> {inst.timing}</div>
+        </div>
       </div>
 
-      <div className="text-xs text-stone-700 bg-blue-50/60 p-2.5 rounded-2xl border border-blue-100 space-y-1">
-        <div><strong>کلاسیں:</strong> {inst.classesOffered}</div>
-        <div><strong>اوقات:</strong> {inst.timing}</div>
-      </div>
-
-      <div className="flex items-center justify-between text-xs text-stone-600 pt-1">
-        <span className="flex items-center gap-1"><MapPin className="w-3.5 h-3.5 text-red-500" />{inst.location}</span>
-        <button onClick={() => setIsInstitutesModalOpen(true)} className="text-blue-700 font-bold hover:underline cursor-pointer">
+      <div className="flex items-center justify-between gap-2 text-xs text-stone-600 pt-1">
+        <span className="flex items-center gap-1 min-w-0 flex-1">
+          <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0" />
+          <span className="truncate">{inst.location}</span>
+        </span>
+        <button onClick={() => setIsInstitutesModalOpen(true)} className="text-blue-700 font-bold hover:underline cursor-pointer shrink-0">
           مکمل تفصیل ➔
         </button>
       </div>
@@ -2313,42 +3090,55 @@ export default function App() {
   );
 
   const renderTransportCard = (veh: VillageTransport) => (
-    <div key={veh.id} className="bg-white rounded-3xl border border-amber-200 p-4 shadow-sm space-y-3 font-nastaliq">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div className="w-10 h-10 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold">
-            <Bus className="w-5 h-5" />
+    <div
+      key={veh.id}
+      className="bg-white rounded-3xl border border-amber-200 p-4 shadow-sm flex flex-col justify-between gap-3 h-full font-nastaliq"
+    >
+      <div className="space-y-3 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2.5 min-w-0 flex-1">
+            {veh.image ? (
+              <img
+                src={veh.image}
+                alt={veh.title}
+                className="w-12 h-12 rounded-2xl object-cover border border-amber-300 shrink-0 bg-stone-900"
+              />
+            ) : (
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center font-bold shrink-0">
+                <Bus className="w-5 h-5" />
+              </div>
+            )}
+            <div className="min-w-0 flex-1">
+              <h4 className="font-bold text-base text-stone-900 truncate">{veh.title}</h4>
+              <span className="text-xs text-stone-500 block truncate">ڈرائیور: {veh.driverName}</span>
+            </div>
           </div>
-          <div>
-            <h4 className="font-bold text-base text-stone-900">{veh.title}</h4>
-            <span className="text-xs text-stone-500">ڈرائیور: {veh.driverName}</span>
-          </div>
+          <button
+            onClick={() => handleSpeakTransport(veh)}
+            className={`p-2 rounded-xl text-xs font-bold transition shadow shrink-0 cursor-pointer ${
+              activeCardAudioId === veh.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-amber-100'
+            }`}
+            title="آواز سنیں 🔊"
+          >
+            {activeCardAudioId === veh.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-700" />}
+          </button>
         </div>
-        <button
-          onClick={() => handleSpeakTransport(veh)}
-          className={`p-2 rounded-xl text-xs font-bold transition shadow ${
-            activeCardAudioId === veh.id ? 'bg-amber-400 text-stone-950 animate-pulse' : 'bg-stone-100 text-stone-800 hover:bg-amber-100'
-          }`}
-          title="آواز سنیں 🔊"
-        >
-          {activeCardAudioId === veh.id ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4 text-amber-700" />}
-        </button>
-      </div>
 
-      <div className="grid grid-cols-2 gap-2 text-xs bg-amber-50/60 p-2.5 rounded-2xl border border-amber-200">
-        <div><strong>روٹ:</strong> {veh.route}</div>
-        <div><strong>روانگی:</strong> {veh.departureTime}</div>
-        <div><strong>کرایہ:</strong> {veh.fare}</div>
-        <div><strong>نمبر پلیٹ:</strong> {veh.vehicleNumber}</div>
+        <div className="grid grid-cols-2 gap-2 text-xs bg-amber-50/60 p-2.5 rounded-2xl border border-amber-200">
+          <div className="truncate"><strong>روٹ:</strong> {veh.route}</div>
+          <div className="truncate"><strong>روانگی:</strong> {veh.departureTime}</div>
+          <div className="truncate"><strong>کرایہ:</strong> {veh.fare}</div>
+          <div className="truncate"><strong>نمبر پلیٹ:</strong> <span className="font-mono" dir="ltr">{veh.vehicleNumber}</span></div>
+        </div>
       </div>
 
       <div className="flex items-center gap-2 pt-1">
         <a
           href={`tel:${veh.driverMobile.replace(/\D/g, '')}`}
-          className="flex-1 py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
+          className="min-h-[42px] flex-1 py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 shadow-sm transition active:scale-95"
         >
-          <Phone className="w-3.5 h-3.5" />
-          <span>ڈرائیور کو کال کریں: {veh.driverMobile}</span>
+          <Phone className="w-3.5 h-3.5 shrink-0" />
+          <span>ڈرائیور کو کال کریں: <span className="font-mono" dir="ltr">{veh.driverMobile}</span></span>
         </a>
       </div>
     </div>
@@ -2393,6 +3183,7 @@ export default function App() {
             }
             return [ev, ...prev];
           });
+          saveNewsEventToFirestore(ev).catch(() => {});
           setBannerImagesVersion((v) => v + 1);
         }}
         onDeleteNewsEvent={handleDeleteNewsEvent}
@@ -2407,21 +3198,42 @@ export default function App() {
         onSaveHelpNotice={handleSaveHelpNotice}
         onDeleteHelpNotice={handleDeleteHelpNotice}
         mandiRates={mandiRates}
-        onSaveMandiRates={setMandiRates}
+        onSaveMandiRates={(items) => {
+          setMandiRates(items);
+          savePortalSettingsToFirestore({ mandiRates: items }).catch(() => {});
+        }}
         shelters={shelters}
-        onSaveShelters={setShelters}
+        onSaveShelters={(items) => {
+          setShelters(items);
+          savePortalSettingsToFirestore({ shelters: items }).catch(() => {});
+        }}
         helpGuides={helpGuides}
-        onSaveHelpGuides={setHelpGuides}
+        onSaveHelpGuides={(items) => {
+          setHelpGuides(items);
+          savePortalSettingsToFirestore({ helpGuides: items }).catch(() => {});
+        }}
         customKeywords={customKeywords}
-        onSaveCustomKeywords={setCustomKeywords}
+        onSaveCustomKeywords={(items) => {
+          setCustomKeywords(items);
+          savePortalSettingsToFirestore({ customKeywords: items }).catch(() => {});
+        }}
         floodAlert={floodAlertStatus}
-        onSaveFloodAlert={setFloodAlertStatus}
+        onSaveFloodAlert={(status) => {
+          setFloodAlertStatus(status);
+          savePortalSettingsToFirestore({ floodAlertStatus: status }).catch(() => {});
+        }}
       />
     );
   }
 
   return (
-    <div className="min-h-screen relative text-stone-900 flex flex-col font-urdu-clean pb-24 sm:pb-12 select-none">
+    <div
+      dir={lang === 'en' ? 'ltr' : 'rtl'}
+      lang={lang}
+      className={`min-h-screen relative text-stone-900 flex flex-col pb-28 md:pb-12 select-none overflow-x-hidden ${
+        lang === 'en' ? 'font-sans leading-snug' : 'font-urdu-clean'
+      }`}
+    >
       {/* Optional Village Background Image */}
       {villageBgImage ? (
         <div
@@ -2433,16 +3245,39 @@ export default function App() {
       {/* Background soft tint */}
       <div className="fixed inset-0 pointer-events-none z-0 bg-stone-100/90" />
 
-      {/* Floating Notification Toast */}
+      {/* Floating Notification Toast (Clickable to open target conversation or Notification Center) */}
       {toastMessage && (
-        <div className="fixed top-14 left-4 right-4 z-50 max-w-md mx-auto bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-emerald-400 flex items-center justify-between gap-2 animate-in slide-in-from-top-4 duration-300">
-          <div className="flex items-center gap-2 text-xs font-bold font-nastaliq">
+        <div
+          onClick={() => {
+            if (toastActionTarget?.messageId) {
+              setInboxInitialMessageId(toastActionTarget.messageId);
+              if (toastActionTarget.recipientPhone) {
+                setInboxPreselectedPhone(toastActionTarget.recipientPhone);
+              }
+              setIsInboxModalOpen(true);
+              setToastMessage(null);
+              setToastActionTarget(null);
+            } else if (toastActionTarget?.openNotifications) {
+              setIsNotificationCenterOpen(true);
+              setToastMessage(null);
+              setToastActionTarget(null);
+            }
+          }}
+          className={`fixed top-14 left-4 right-4 z-50 max-w-md mx-auto bg-gradient-to-r from-emerald-800 to-teal-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-emerald-400 flex items-center justify-between gap-2 animate-in slide-in-from-top-4 duration-300 ${
+            toastActionTarget ? 'cursor-pointer hover:from-emerald-700 hover:to-teal-800' : ''
+          }`}
+        >
+          <div className="flex items-center gap-2 text-xs font-bold font-nastaliq min-w-0">
             <span className="p-1.5 bg-amber-400 text-stone-950 rounded-full shrink-0">🔔</span>
-            <span>{toastMessage}</span>
+            <span className="break-words">{toastMessage}</span>
           </div>
           <button
-            onClick={() => setToastMessage(null)}
-            className="p-1 text-emerald-200 hover:text-white"
+            onClick={(e) => {
+              e.stopPropagation();
+              setToastMessage(null);
+              setToastActionTarget(null);
+            }}
+            className="p-1 text-emerald-200 hover:text-white shrink-0"
           >
             <X className="w-4 h-4" />
           </button>
@@ -2454,28 +3289,28 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-3 sm:px-6 py-2.5 space-y-2">
           {/* Top Brand & Utility Row (Cleaned & De-cluttered) */}
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
               {/* Main Menu Hamburger */}
               <button
                 onClick={() => setIsMainMenuOpen(true)}
-                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer active:scale-95"
+                className="p-2 rounded-xl bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition cursor-pointer active:scale-95 shrink-0 min-h-[38px] min-w-[38px]"
                 title="مین مینیو"
                 aria-label="Main Menu"
               >
                 <Menu className="w-5 h-5 text-amber-300" />
               </button>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 min-w-0">
                 <img
                   src="/logo.png"
                   alt="رتہ کلاں جھنگ پورٹل لوگو"
                   className="w-8 h-8 sm:w-9 sm:h-9 rounded-xl object-cover border border-amber-400/90 shadow-md shrink-0 bg-emerald-950"
                 />
-                <div>
-                  <h1 className="font-bold text-sm sm:text-base text-amber-200 font-nastaliq leading-tight">
+                <div className="min-w-0">
+                  <h1 className="font-bold text-sm sm:text-base text-amber-200 font-nastaliq leading-relaxed truncate">
                     رتہ کلاں جھنگ پورٹل
                   </h1>
-                  <span className="text-[10px] text-emerald-300 font-nastaliq block leading-none">
+                  <span className="text-[10px] text-emerald-300 font-nastaliq block leading-relaxed truncate">
                     کمیونٹی سروسز و ہنر مند ڈائریکٹری
                   </span>
                 </div>
@@ -2483,32 +3318,49 @@ export default function App() {
             </div>
 
             {/* Quick Action Navigation Buttons */}
-            <div className="flex items-center gap-1.5">
+            <div className="flex items-center gap-1 sm:gap-1.5 shrink-0">
               {/* News events indicator */}
               <button
                 onClick={() => setIsNewsPopupOpen(true)}
-                className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-2 sm:px-2.5 py-1 rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1 shadow cursor-pointer transition active:scale-95 font-nastaliq"
+                className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-2 sm:px-2.5 py-1.5 rounded-xl text-[10px] sm:text-xs font-bold flex items-center gap-1 shadow cursor-pointer transition active:scale-95 font-nastaliq min-h-[34px]"
                 title="گاؤں کے واقعات و خبریں"
               >
-                <Megaphone className="w-3.5 h-3.5" />
+                <Megaphone className="w-3.5 h-3.5 shrink-0" />
                 <span className="hidden xs:inline">خبریں</span>
                 <span className="font-mono">({newsEvents.length})</span>
               </button>
 
-              {/* Messages button with badge */}
+              {/* Messages button with recipient-scoped unread badge */}
               <button
                 onClick={() => {
                   setInboxPreselectedPhone('');
+                  setInboxInitialMessageId(null);
                   setIsInboxModalOpen(true);
                 }}
-                className="relative p-1.5 sm:px-2.5 sm:py-1 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs cursor-pointer flex items-center gap-1 transition"
+                className="relative p-1.5 sm:px-2.5 sm:py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs cursor-pointer flex items-center gap-1 transition min-h-[34px]"
                 title="پیغامات / ان باکس"
               >
-                <Mail className="w-4 h-4 text-emerald-300" />
+                <Mail className="w-4 h-4 text-emerald-300 shrink-0" />
                 <span className="text-[10px] font-nastaliq hidden sm:inline">ان باکس</span>
                 {totalUnreadCount > 0 && (
-                  <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-600 text-white rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse">
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-red-600 text-white rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse">
                     {totalUnreadCount}
+                  </span>
+                )}
+              </button>
+
+              {/* Notification Center Bell button with unread badge */}
+              <button
+                onClick={() => setIsNotificationCenterOpen(true)}
+                className="relative p-1.5 sm:px-2.5 sm:py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs cursor-pointer flex items-center gap-1 transition min-h-[34px]"
+                title="اطلاعات و نوٹیفکیشنز (Notifications & Sound Settings)"
+                aria-label="Notifications"
+              >
+                <Bell className="w-4 h-4 text-amber-300 shrink-0" />
+                <span className="text-[10px] font-nastaliq hidden md:inline">اطلاعات</span>
+                {unreadNotificationIds.size > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[16px] h-4 px-1 bg-red-600 text-white rounded-full text-[9px] font-bold flex items-center justify-center animate-pulse">
+                    {unreadNotificationIds.size}
                   </span>
                 )}
               </button>
@@ -2518,7 +3370,7 @@ export default function App() {
                 onClick={() =>
                   setLang((prev) => (prev === 'ur' ? 'pa' : prev === 'pa' ? 'en' : 'ur'))
                 }
-                className="px-2 py-1 bg-emerald-900/80 hover:bg-emerald-800 text-amber-200 rounded-xl text-[10px] font-bold border border-emerald-700/60 cursor-pointer transition"
+                className="px-2 py-1.5 bg-emerald-900/80 hover:bg-emerald-800 text-amber-200 rounded-xl text-[10px] font-bold border border-emerald-700/60 cursor-pointer transition min-h-[34px]"
                 title="زبان تبدیل کریں"
               >
                 {lang === 'ur' ? 'اردو' : lang === 'pa' ? 'پنجابی' : 'EN'}
@@ -2533,7 +3385,7 @@ export default function App() {
                   }}
                   dir="ltr"
                   lang="en"
-                  className="px-2 sm:px-2.5 py-1 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-xl text-[10px] sm:text-xs cursor-pointer flex items-center gap-1.5 border border-emerald-500/50 shadow-xs transition font-sans"
+                  className="px-2 sm:px-2.5 py-1.5 bg-emerald-700/80 hover:bg-emerald-600 text-white rounded-xl text-[10px] sm:text-xs cursor-pointer flex items-center gap-1.5 border border-emerald-500/50 shadow-xs transition font-sans min-h-[34px]"
                   title={`${activeUserSession.name} (Signed In — Click for Account & Sign Out)`}
                 >
                   <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse shrink-0" />
@@ -2549,10 +3401,10 @@ export default function App() {
                   }}
                   dir="ltr"
                   lang="en"
-                  className="px-2 sm:px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-[10px] sm:text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs transition active:scale-95 font-sans"
+                  className="px-2 sm:px-2.5 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-[10px] sm:text-xs font-bold cursor-pointer flex items-center gap-1 shadow-xs transition active:scale-95 font-sans min-h-[34px]"
                   title="Sign In to your account"
                 >
-                  <KeyRound className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-stone-950" />
+                  <KeyRound className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-stone-950 shrink-0" />
                   <span className="hidden xs:inline">Sign In</span>
                 </button>
               )}
@@ -2642,8 +3494,8 @@ export default function App() {
 
             {/* Quick 1-Tap Keyword Badges for Instant Illiterate / Mobile Filter (Hidden during active search to prevent clutter) */}
             {!searchQuery.trim() && (
-              <div className="flex items-center gap-1.5 overflow-x-auto pt-1.5 scrollbar-none text-[10px]">
-                <span className="text-emerald-300 font-nastaliq shrink-0 font-bold">فوری تلاش:</span>
+              <div className="quick-search-container flex flex-wrap items-center gap-2 pt-2 text-[11px]">
+                <span className="text-emerald-300 font-nastaliq shrink-0 font-bold py-0.5">فوری تلاش:</span>
                 {[
                   { label: 'ڈاکٹر', icon: '🩺' },
                   { label: 'ہسپتال', icon: '🏥' },
@@ -2659,14 +3511,15 @@ export default function App() {
                 ].map((item) => (
                   <button
                     key={item.label}
+                    type="button"
                     onClick={() => handleSelectQuickVoiceTag(item.label)}
-                    className={`px-2 py-0.5 rounded-lg border whitespace-nowrap font-nastaliq cursor-pointer transition ${
+                    className={`px-2.5 py-1 rounded-xl border whitespace-nowrap shrink-0 font-nastaliq cursor-pointer transition inline-flex items-center gap-1 ${
                       searchQuery === item.label
                         ? 'bg-amber-400 text-stone-950 font-bold border-amber-300 shadow'
                         : 'bg-emerald-900/60 hover:bg-emerald-800/80 text-emerald-100 border-emerald-700/60'
                     }`}
                   >
-                    <span className="mr-0.5">{item.icon}</span>
+                    <span>{item.icon}</span>
                     <span>{item.label}</span>
                   </button>
                 ))}
@@ -3369,7 +4222,7 @@ export default function App() {
                 </div>
                 <div className="text-right">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <h4 className="font-bold text-sm sm:text-base font-nastaliq text-amber-300 leading-tight">
+                    <h4 className="font-bold text-sm sm:text-base font-nastaliq text-amber-300 leading-relaxed">
                       رتہ کلاں ورچوئل AI اسکول
                     </h4>
                     <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow font-nastaliq">
@@ -3399,75 +4252,77 @@ export default function App() {
             <div className="mb-3">
               <button
                 onClick={() => setIsHelpNoticeboardOpen(true)}
-                className="w-full py-2.5 px-3 bg-gradient-to-r from-rose-700 via-red-600 to-amber-600 hover:from-rose-800 hover:to-amber-700 text-white font-bold text-xs rounded-2xl shadow-md flex items-center justify-between font-nastaliq transition cursor-pointer active:scale-98 border border-red-300"
+                className="w-full py-2.5 px-3.5 bg-gradient-to-r from-rose-700 via-red-600 to-amber-600 hover:from-rose-800 hover:to-amber-700 text-white font-bold text-xs rounded-2xl shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-nastaliq transition cursor-pointer active:scale-98 border border-red-300 text-right"
               >
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-amber-300 animate-ping" />
-                  <HeartPulse className="w-4 h-4 text-amber-300" />
-                  <span>مدد درکار ہے — خون کا عطیہ / گمشدہ اشیاء و ہنگامی امداد نوٹس بورڈ</span>
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="w-2.5 h-2.5 rounded-full bg-amber-300 animate-ping shrink-0" />
+                  <HeartPulse className="w-4 h-4 text-amber-300 shrink-0" />
+                  <span className="leading-relaxed">
+                    مدد درکار ہے — خون کا عطیہ / گمشدہ اشیاء و ہنگامی امداد نوٹس بورڈ
+                  </span>
                 </div>
-                <span className="bg-white/20 px-2 py-0.5 rounded-lg text-[10px] shrink-0">
+                <span className="bg-white/20 px-2.5 py-1 rounded-xl text-[10px] shrink-0 self-end sm:self-center">
                   دیکھیں و درج کریں ➔
                 </span>
               </button>
             </div>
 
             {/* Quick Services Buttons Row: Mosques, Schools, Transport, Hospitals, Management */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2 mb-3 text-xs">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5 mb-3 text-xs">
               {/* Mosques & Prayer Timings */}
               <button
                 onClick={() => setIsMosquesModalOpen(true)}
-                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-emerald-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-50 transition active:scale-95 cursor-pointer min-h-[76px]"
+                className="p-3 rounded-2xl bg-white border border-emerald-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-50 transition active:scale-95 cursor-pointer min-h-[84px]"
               >
-                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
                   <Compass className="w-4 h-4 text-emerald-800" />
                 </div>
-                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-tight">
+                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-relaxed">
                   مساجد ({mosques.length})
                 </strong>
-                <span className="text-[10px] sm:text-xs text-stone-500">اوقات</span>
+                <span className="text-[10px] sm:text-xs text-stone-500 leading-relaxed">اوقات نماز</span>
               </button>
 
               {/* Schools & Colleges */}
               <button
                 onClick={() => setIsInstitutesModalOpen(true)}
-                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-blue-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-blue-50 transition active:scale-95 cursor-pointer min-h-[76px]"
+                className="p-3 rounded-2xl bg-white border border-blue-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-blue-50 transition active:scale-95 cursor-pointer min-h-[84px]"
               >
-                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center shrink-0">
                   <GraduationCap className="w-4 h-4 text-blue-800" />
                 </div>
-                <strong className="text-blue-950 text-xs sm:text-sm font-nastaliq leading-tight">
+                <strong className="text-blue-950 text-xs sm:text-sm font-nastaliq leading-relaxed">
                   اسکولز ({institutes.length})
                 </strong>
-                <span className="text-[10px] sm:text-xs text-stone-500">ٹائم ٹیبل</span>
+                <span className="text-[10px] sm:text-xs text-stone-500 leading-relaxed">ٹائم ٹیبل</span>
               </button>
 
               {/* Public Transport & Vans to Jhang */}
               <button
                 onClick={() => setIsTransportModalOpen(true)}
-                className="p-2.5 sm:p-3 rounded-2xl bg-white border border-amber-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-amber-50 transition active:scale-95 cursor-pointer min-h-[76px]"
+                className="p-3 rounded-2xl bg-white border border-amber-300 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-amber-50 transition active:scale-95 cursor-pointer min-h-[84px]"
               >
-                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-amber-100 flex items-center justify-center shrink-0">
                   <Bus className="w-4 h-4 text-amber-800" />
                 </div>
-                <strong className="text-amber-950 text-xs sm:text-sm font-nastaliq leading-tight">
+                <strong className="text-amber-950 text-xs sm:text-sm font-nastaliq leading-relaxed">
                   گاڑیاں ({transports.length})
                 </strong>
-                <span className="text-[10px] sm:text-xs text-stone-500">رتہ تا جھنگ</span>
+                <span className="text-[10px] sm:text-xs text-stone-500 leading-relaxed">رتہ تا جھنگ</span>
               </button>
 
               {/* Hospitals & Medical Emergency Button */}
               <button
                 onClick={() => setIsHospitalsModalOpen(true)}
-                className="p-2.5 sm:p-3 rounded-2xl bg-gradient-to-b from-red-50 to-rose-100 border-2 border-red-400 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-red-100 transition active:scale-95 cursor-pointer relative min-h-[76px]"
+                className="p-3 rounded-2xl bg-gradient-to-b from-red-50 to-rose-100 border-2 border-red-400 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-red-100 transition active:scale-95 cursor-pointer relative min-h-[84px]"
               >
-                <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs">
+                <div className="w-8 h-8 rounded-full bg-red-600 text-white flex items-center justify-center shadow-xs shrink-0">
                   <HeartPulse className="w-4 h-4 animate-pulse" />
                 </div>
-                <strong className="text-red-950 text-xs sm:text-sm font-nastaliq leading-tight">
+                <strong className="text-red-950 text-xs sm:text-sm font-nastaliq leading-relaxed">
                   ہسپتال ({hospitals.length})
                 </strong>
-                <span className="text-[10px] sm:text-xs text-red-700 font-bold animate-pulse">24/7 الرٹ</span>
+                <span className="text-[10px] sm:text-xs text-red-700 font-bold animate-pulse leading-relaxed">24/7 الرٹ</span>
               </button>
 
               {/* Mosque & School Management Login */}
@@ -3477,22 +4332,45 @@ export default function App() {
                   setEditingEntityType('mosque');
                   setIsTimetableModalOpen(true);
                 }}
-                className="col-span-2 sm:col-span-2 md:col-span-1 p-2.5 sm:p-3 rounded-2xl bg-emerald-900/10 border border-emerald-500/60 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-100/60 transition active:scale-95 cursor-pointer min-h-[76px]"
+                className="col-span-2 sm:col-span-2 md:col-span-1 p-3 rounded-2xl bg-emerald-900/10 border border-emerald-500/60 shadow-sm flex flex-col items-center justify-center text-center gap-1 hover:bg-emerald-100/60 transition active:scale-95 cursor-pointer min-h-[84px]"
               >
-                <div className="w-8 h-8 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center">
+                <div className="w-8 h-8 rounded-full bg-amber-400 text-stone-950 flex items-center justify-center shrink-0">
                   <Lock className="w-4 h-4" />
                 </div>
-                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-tight">
+                <strong className="text-emerald-950 text-xs sm:text-sm font-nastaliq leading-relaxed">
                   انتظامیہ لاگ ان
                 </strong>
-                <span className="text-[10px] sm:text-xs text-emerald-800 font-bold">امام و پرنسپل</span>
+                <span className="text-[10px] sm:text-xs text-emerald-800 font-bold leading-relaxed">امام و پرنسپل</span>
               </button>
             </div>
+
+            {/* Compact Live Mandi Rates & Community Guidelines Strip */}
+            {mandiRates.length > 0 && (
+              <div className="bg-white border border-emerald-200 rounded-2xl p-2.5 mb-3 shadow-xs flex items-center gap-2 overflow-x-auto scrollbar-none">
+                <span className="px-2.5 py-1 rounded-xl bg-emerald-800 text-amber-300 text-[11px] font-bold font-nastaliq shrink-0 flex items-center gap-1">
+                  <span>🌾</span>
+                  <span>منڈی ریٹ جھنگ:</span>
+                </span>
+                <div className="flex items-center gap-2 shrink-0">
+                  {mandiRates.map((rate) => (
+                    <div
+                      key={rate.id}
+                      className="px-2.5 py-1 rounded-xl bg-stone-50 border border-stone-200 flex items-center gap-1.5 text-[11px] whitespace-nowrap font-nastaliq"
+                    >
+                      <span className="font-bold text-stone-800">{rate.cropNameUrdu}:</span>
+                      <span className="font-bold text-emerald-700">
+                        {rate.rateText}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Religious Promotion Warning & Illiterate Help Banner */}
             <div className="space-y-2 mb-3">
               <div className="bg-amber-50 border border-amber-300 rounded-2xl p-2.5 flex items-center justify-between gap-2 text-xs shadow-sm">
-                <div className="flex items-center gap-1.5 flex-1">
+                <div className="flex items-center gap-1.5 flex-1 min-w-0">
                   <span className="text-base shrink-0">🚫</span>
                   <span className="font-bold text-amber-950 font-nastaliq text-[11px] sm:text-xs leading-relaxed">
                     مذہبی پروموشن اور فرقہ واریت سے پرہیز کریں۔ پورٹل صرف روزگار کے لیے ہے۔
@@ -3500,19 +4378,19 @@ export default function App() {
                 </div>
                 <button
                   onClick={() => setIsTermsModalOpen(true)}
-                  className="text-emerald-800 hover:underline font-bold text-[11px] shrink-0 cursor-pointer font-nastaliq"
+                  className="text-emerald-800 hover:underline font-bold text-[11px] shrink-0 cursor-pointer font-nastaliq px-2 py-1 rounded-lg bg-amber-100/70"
                 >
                   اصول سنیں
                 </button>
               </div>
             </div>
 
-            {/* Categories Horizontal Scroll Tabs */}
-            <div className="flex items-center gap-1.5 overflow-x-auto pb-2 mb-3 scrollbar-none">
+            {/* Categories Filter Buttons (Flex-wrap with 8px gap so buttons never collide) */}
+            <div className="quick-search-container flex flex-wrap items-center gap-2 pb-2 mb-3">
               {/* Daily Wage Laborers & Available Today Toggle */}
               <button
                 onClick={() => setOnlyAvailableWorkers((prev) => !prev)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition shadow-sm border cursor-pointer font-nastaliq flex items-center gap-1.5 ${
+                className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition shadow-sm border cursor-pointer font-nastaliq flex items-center gap-1.5 min-h-[38px] ${
                   onlyAvailableWorkers
                     ? 'bg-amber-500 text-stone-950 border-amber-600 ring-2 ring-amber-300'
                     : 'bg-amber-50 hover:bg-amber-100 text-amber-950 border-amber-300'
@@ -3525,10 +4403,10 @@ export default function App() {
 
               <button
                 onClick={() => setSelectedCategory('all')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition shadow-sm border cursor-pointer font-nastaliq ${
+                className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition shadow-sm border cursor-pointer font-nastaliq min-h-[38px] ${
                   selectedCategory === 'all'
                     ? 'bg-emerald-700 text-white border-emerald-700'
-                    : 'bg-white text-stone-700 border-stone-200'
+                    : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
                 }`}
               >
                 {cats.all}
@@ -3539,10 +4417,10 @@ export default function App() {
                   <button
                     key={key}
                     onClick={() => setSelectedCategory(key)}
-                    className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition shadow-sm border cursor-pointer font-nastaliq ${
+                    className={`px-3 py-2 rounded-xl text-xs font-bold whitespace-nowrap shrink-0 transition shadow-sm border cursor-pointer font-nastaliq min-h-[38px] ${
                       selectedCategory === key
                         ? 'bg-emerald-700 text-white border-emerald-700'
-                        : 'bg-white text-stone-700 border-stone-200'
+                        : 'bg-white text-stone-700 border-stone-200 hover:bg-stone-50'
                     }`}
                   >
                     {label}
@@ -3551,7 +4429,7 @@ export default function App() {
             </div>
 
             {/* Profiles Count Header */}
-            <div className="flex items-center justify-between text-xs text-stone-600 font-bold px-1 mb-2 font-nastaliq">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-600 font-bold px-1 mb-2.5 font-nastaliq">
               <span>رتہ کلاں کاریگر و دکانیں ({filteredProfiles.length})</span>
               <button
                 onClick={() => setIsTermsModalOpen(true)}
@@ -3576,7 +4454,7 @@ export default function App() {
                     setRegisterDefaultTab('profile');
                     setIsRegisterModalOpen(true);
                   }}
-                  className="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow cursor-pointer font-nastaliq"
+                  className="px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold rounded-xl shadow cursor-pointer font-nastaliq min-h-[40px]"
                 >
                   + نیا کارڈ رجسٹر کریں
                 </button>
@@ -3603,13 +4481,13 @@ export default function App() {
             <div className="absolute top-0 right-0 w-44 h-44 bg-red-600/15 rounded-full blur-3xl pointer-events-none" />
 
             {/* Section Header */}
-            <div className="flex items-center justify-between gap-2 mb-3 relative z-10">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shadow-md animate-pulse">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 relative z-10">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shadow-md animate-pulse shrink-0">
                   <HeartPulse className="w-6 h-6" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <h3 className="font-bold text-base sm:text-lg font-nastaliq text-red-100">
                       🚨 ہسپتال اور ایمرجنسی طبی خدمات
                     </h3>
@@ -3617,7 +4495,7 @@ export default function App() {
                       24/7 الرٹ
                     </span>
                   </div>
-                  <p className="text-[11px] text-red-200 font-nastaliq">
+                  <p className="text-[11px] text-red-200 font-nastaliq leading-relaxed">
                     ریسکیو 1122، ڈی ایچ کیو ہسپتال جھنگ، رورل ہیلتھ سینٹر (RHC) و ادویات
                   </p>
                 </div>
@@ -3625,27 +4503,27 @@ export default function App() {
 
               <button
                 onClick={() => setIsHospitalsModalOpen(true)}
-                className="px-3 py-1.5 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl text-xs font-nastaliq shadow transition active:scale-95 whitespace-nowrap shrink-0 cursor-pointer"
+                className="px-3.5 py-2 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl text-xs font-nastaliq shadow transition active:scale-95 whitespace-nowrap shrink-0 cursor-pointer self-end sm:self-center min-h-[38px]"
               >
                 تمام ہسپتال دیکھیں ({hospitals.length}) ➔
               </button>
             </div>
 
             {/* Direct 1-Tap Emergency Calling Ribbon */}
-            <div className="grid grid-cols-2 gap-2 mb-3 relative z-10">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3 relative z-10">
               <a
                 href="tel:1122"
-                className="bg-red-600 hover:bg-red-500 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-red-400"
+                className="bg-red-600 hover:bg-red-500 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-red-400 min-h-[44px]"
               >
-                <PhoneCall className="w-4 h-4 animate-bounce" />
+                <PhoneCall className="w-4 h-4 animate-bounce shrink-0" />
                 <span>ریسکیو 1122 (مفت کال)</span>
               </a>
 
               <a
                 href="tel:0479200234"
-                className="bg-emerald-700 hover:bg-emerald-600 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-emerald-400"
+                className="bg-emerald-700 hover:bg-emerald-600 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-emerald-400 min-h-[44px]"
               >
-                <PhoneCall className="w-4 h-4 animate-bounce" />
+                <PhoneCall className="w-4 h-4 animate-bounce shrink-0" />
                 <span>ڈی ایچ کیو ہسپتال جھنگ</span>
               </a>
             </div>
@@ -3663,7 +4541,7 @@ export default function App() {
                         : 'border-white/15 hover:border-red-400/50'
                     }`}
                   >
-                    <div className="space-y-1">
+                    <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-sm text-white font-nastaliq">
                           {hosp.name}
@@ -3679,11 +4557,11 @@ export default function App() {
                       </div>
                       <div className="text-[11px] text-stone-300 flex items-center gap-3 flex-wrap">
                         <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-red-400" />
+                          <MapPin className="w-3 h-3 text-red-400 shrink-0" />
                           {hosp.distance}
                         </span>
                         <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-emerald-400" />
+                          <Clock className="w-3 h-3 text-emerald-400 shrink-0" />
                           {hosp.timing}
                         </span>
                       </div>
@@ -3692,7 +4570,7 @@ export default function App() {
                     <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
                       <button
                         onClick={() => handleSpeakHospital(hosp)}
-                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer ${
+                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer min-h-[36px] ${
                           isPlaying
                             ? 'bg-amber-400 text-stone-950 animate-pulse font-bold'
                             : 'bg-white/20 hover:bg-white/30 text-white'
@@ -3705,10 +4583,10 @@ export default function App() {
 
                       <a
                         href={`tel:${hosp.contact.replace(/\D/g, '')}`}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow font-nastaliq active:scale-95 transition"
+                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow font-nastaliq active:scale-95 transition min-h-[36px]"
                       >
-                        <Phone className="w-3 h-3" />
-                        <span>کال: {hosp.contact}</span>
+                        <Phone className="w-3 h-3 shrink-0" />
+                        <span dir="ltr">{hosp.contact}</span>
                       </a>
                     </div>
                   </div>
@@ -3720,13 +4598,13 @@ export default function App() {
           {/* 2. Executive Super Admin & Official Helpline Section */}
           <div className="bg-gradient-to-r from-stone-950 via-emerald-950 to-stone-950 border-2 border-amber-400/80 rounded-2xl p-4 shadow-lg space-y-3 font-nastaliq">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-800 pb-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center font-bold shadow shrink-0">
                   <ShieldCheck className="w-7 h-7 text-emerald-950" />
                 </div>
-                <div>
-                  <div className="flex items-center gap-2">
-                    <h3 className="font-bold text-base sm:text-lg text-amber-300 leading-tight">
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="font-bold text-base sm:text-lg text-amber-300 leading-relaxed">
                       مرکزی انتظامیہ رتہ کلاں پورٹل
                     </h3>
                     <span className="bg-amber-400 text-stone-950 text-[10px] font-bold px-2 py-0.5 rounded-full font-sans">
@@ -3747,16 +4625,16 @@ export default function App() {
                       window.location.hash = '#admin';
                     }
                   }}
-                  className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5"
+                  className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5 min-h-[38px]"
                 >
-                  <ShieldCheck className="w-4 h-4" />
+                  <ShieldCheck className="w-4 h-4 shrink-0" />
                   <span>ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری</span>
                 </button>
                 <button
                   onClick={() => setIsAdminModalOpen(true)}
-                  className="bg-emerald-700 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5 border border-emerald-500"
+                  className="bg-emerald-700 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5 border border-emerald-500 min-h-[38px]"
                 >
-                  <Lock className="w-3.5 h-3.5" />
+                  <Lock className="w-3.5 h-3.5 shrink-0" />
                   <span>فوری ایڈمن پینل</span>
                 </button>
               </div>
@@ -3766,19 +4644,19 @@ export default function App() {
             <div className="pt-1">
               <a
                 href="tel:03270019099"
-                className="p-3 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white rounded-2xl flex items-center justify-between text-xs font-bold transition shadow-md active:scale-98 cursor-pointer font-sans"
+                className="p-3 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white rounded-2xl flex items-center justify-between gap-2 text-xs font-bold transition shadow-md active:scale-98 cursor-pointer font-sans min-h-[52px]"
                 title="آفیشل ہیلپ لائن رتہ کلاں جھنگ"
               >
-                <div className="flex items-center gap-2">
-                  <div className="p-1.5 bg-white/20 rounded-xl">
+                <div className="flex items-center gap-2 min-w-0">
+                  <div className="p-1.5 bg-white/20 rounded-xl shrink-0">
                     <PhoneCall className="w-4 h-4 text-amber-200 animate-pulse" />
                   </div>
-                  <div className="text-right">
+                  <div className="text-right min-w-0">
                     <span className="font-nastaliq text-[11px] text-red-100 block">مرکزی رابطہ و شکایت:</span>
                     <span className="font-nastaliq text-xs">آفیشل ہیلپ لائن</span>
                   </div>
                 </div>
-                <span className="font-mono text-base font-extrabold tracking-wider bg-black/30 px-2.5 py-1 rounded-xl">
+                <span className="font-mono text-sm sm:text-base font-extrabold tracking-wider bg-black/30 px-2.5 py-1 rounded-xl shrink-0" dir="ltr">
                   0327-0019099
                 </span>
               </a>
@@ -3791,9 +4669,9 @@ export default function App() {
               href={facebookPageUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-nastaliq"
+              className="w-full py-2.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-nastaliq min-h-[44px]"
             >
-              <FacebookIcon className="w-4 h-4" />
+              <FacebookIcon className="w-4 h-4 shrink-0" />
               <span>رتہ کلاں جھنگ آفیشل فیس بک پیج وزٹ کریں ➔</span>
             </a>
           </div>
@@ -3814,7 +4692,7 @@ export default function App() {
           {/* 5. Contributors Acknowledgment */}
           <div className="bg-stone-800/90 p-4 rounded-2xl border border-stone-700 space-y-3 font-nastaliq">
             <div className="flex items-center gap-2 text-amber-300 font-bold text-xs sm:text-sm">
-              <Users className="w-4 h-4 text-amber-400" />
+              <Users className="w-4 h-4 text-amber-400 shrink-0" />
               <span>رتہ کلاں پورٹل کے معاونین:</span>
             </div>
 
@@ -3826,7 +4704,7 @@ export default function App() {
               {contributors.map((item, idx) => (
                 <div
                   key={idx}
-                  className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center text-xs shadow-xs text-center"
+                  className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center text-xs shadow-xs text-center min-h-[40px]"
                 >
                   <span className="font-bold text-emerald-200">{item.name}</span>
                 </div>
@@ -3850,7 +4728,7 @@ export default function App() {
                   e.preventDefault();
                   navigateToFooterPage('privacy');
                 }}
-                className="min-h-[56px] px-4 py-3 rounded-2xl bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-emerald-500 transition active:scale-95 cursor-pointer"
+                className="min-h-[52px] px-4 py-3 rounded-2xl bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-emerald-500 transition active:scale-95 cursor-pointer"
               >
                 <ShieldCheck className="w-5 h-5 text-amber-300 shrink-0" />
                 <span>پرائیویسی پالیسی</span>
@@ -3862,7 +4740,7 @@ export default function App() {
                   e.preventDefault();
                   navigateToFooterPage('terms');
                 }}
-                className="min-h-[56px] px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-amber-300 transition active:scale-95 cursor-pointer"
+                className="min-h-[52px] px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-amber-300 transition active:scale-95 cursor-pointer"
               >
                 <BookOpen className="w-5 h-5 text-stone-950 shrink-0" />
                 <span>شرائط و ضوابط</span>
@@ -3874,7 +4752,7 @@ export default function App() {
                   e.preventDefault();
                   navigateToFooterPage('emergency');
                 }}
-                className="min-h-[56px] px-4 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-red-400 transition active:scale-95 cursor-pointer"
+                className="min-h-[52px] px-4 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-red-400 transition active:scale-95 cursor-pointer"
               >
                 <PhoneCall className="w-5 h-5 text-amber-200 shrink-0" />
                 <span>ایمرجنسی</span>
@@ -3896,18 +4774,18 @@ export default function App() {
           setVoiceAskInitialQuestion('');
           setIsVoiceAskModalOpen(true);
         }}
-        className="fixed bottom-20 md:bottom-6 left-2.5 sm:left-6 z-40 min-h-[48px] sm:min-h-[54px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-3.5 sm:px-4 py-2.5 rounded-full shadow-2xl border-2 border-amber-300 flex items-center gap-1.5 sm:gap-2 font-nastaliq font-extrabold text-xs sm:text-sm hover:scale-105 active:scale-95 transition cursor-pointer"
+        className="fixed bottom-[76px] md:bottom-6 left-2.5 sm:left-6 z-40 min-h-[46px] sm:min-h-[52px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-3.5 sm:px-4 py-2 rounded-full shadow-2xl border-2 border-amber-300 flex items-center gap-1.5 sm:gap-2 font-nastaliq font-extrabold text-xs sm:text-sm hover:scale-105 active:scale-95 transition cursor-pointer"
         title="بول کر پوچھیں (صوتی مددگار)"
         aria-label="بول کر پوچھیں"
       >
-        <Mic className="w-5 h-5 sm:w-6 sm:h-6 text-amber-300 shrink-0" />
+        <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 shrink-0" />
         <span>بول کر پوچھیں</span>
       </button>
 
       {/* Small, Non-Obstructive Clickable Floating Emergency Button (🚨 ایمرجنسی) */}
       <button
         onClick={() => navigateToFooterPage('emergency')}
-        className="fixed bottom-20 md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[48px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2.5 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
+        className="fixed bottom-[76px] md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[46px] sm:min-h-[52px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
         title="ایمرجنسی صفحہ کھولیں"
         aria-label="Emergency Page"
       >
@@ -3965,11 +4843,11 @@ export default function App() {
             )}
 
             {/* Quick 1-tap keyword tags for guaranteed voice-less or voice-supported search */}
-            <div className="space-y-1.5 text-right">
+            <div className="space-y-2 text-right">
               <span className="text-[11px] font-bold text-stone-600 block font-nastaliq">
                 فوری صوتی الفاظ (ایک کلک سے منتخب کریں):
               </span>
-              <div className="flex flex-wrap gap-1.5 justify-center font-nastaliq">
+              <div className="quick-search-container flex flex-wrap gap-2 justify-center font-nastaliq">
                 {[
                   'ڈاکٹر',
                   'الیکٹریشن',
@@ -3984,8 +4862,9 @@ export default function App() {
                 ].map((tag) => (
                   <button
                     key={tag}
+                    type="button"
                     onClick={() => handleSelectQuickVoiceTag(tag)}
-                    className="px-3 py-1.5 bg-stone-100 hover:bg-emerald-600 hover:text-white rounded-xl text-xs font-bold text-stone-800 border border-stone-300 transition shadow-sm cursor-pointer"
+                    className="px-3 py-1.5 bg-stone-100 hover:bg-emerald-600 hover:text-white rounded-xl text-xs font-bold text-stone-800 border border-stone-300 transition shadow-sm cursor-pointer shrink-0"
                   >
                     🔊 {tag}
                   </button>
@@ -4202,13 +5081,17 @@ export default function App() {
         onClose={() => {
           setIsInboxModalOpen(false);
           setInboxPreselectedPhone('');
+          setInboxInitialMessageId(null);
         }}
         messages={messages}
+        initialSelectedMessageId={inboxInitialMessageId}
         prefilledMobile={inboxPreselectedPhone || currentUserPhone}
         activeSession={activeUserSession}
         profiles={profiles}
         onReplyDiscussion={handleReplyDiscussion}
         onReply={handleReplyMessage}
+        onMarkMessageRead={handleMarkMessageRead}
+        onRetrySendMessage={handleRetrySendMessage}
         onDeleteMessageForUser={handleDeleteMessageForUser}
         onUndoDeleteMessageForUser={handleUndoDeleteMessageForUser}
         onAdminDeleteMessage={handleDeleteMessage}
@@ -4216,6 +5099,28 @@ export default function App() {
         onOpenLoginModal={() => setIsAuthModalOpen(true)}
         isAdmin={activeUserSession?.type === 'admin'}
         lang={lang}
+      />
+
+      {/* 9b. Notification Center & Sound / Push Settings Modal */}
+      <NotificationCenterModal
+        isOpen={isNotificationCenterOpen}
+        onClose={() => setIsNotificationCenterOpen(false)}
+        notifications={userScopedNotifications}
+        unreadIds={unreadNotificationIds}
+        settings={notificationSettings}
+        onUpdateSettings={handleUpdateNotificationSettings}
+        onRequestPushPermission={() =>
+          requestAndRegisterPushNotifications({
+            session: activeUserSession,
+            currentUserPhone,
+            matchedProfileId: matchedUserProfile?.id || null,
+          })
+        }
+        onSelectNotification={handleSelectNotificationItem}
+        onMarkAsRead={handleMarkNotificationAsRead}
+        onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+        onDeleteNotification={handleDeleteSingleNotification}
+        onClearAllNotifications={handleClearAllNotifications}
       />
 
       {/* 10. Super Admin Panel Modal */}
@@ -4246,9 +5151,15 @@ export default function App() {
         onResolveAlert={handleResolveAlert}
         onDeleteAlert={handleDeleteAlert}
         facebookPageUrl={facebookPageUrl}
-        onUpdateFacebookPageUrl={setFacebookPageUrl}
+        onUpdateFacebookPageUrl={(url) => {
+          setFacebookPageUrl(url);
+          savePortalSettingsToFirestore({ facebookPageUrl: url }).catch(() => {});
+        }}
         villageBgImage={villageBgImage}
-        onUpdateVillageBgImage={setVillageBgImage}
+        onUpdateVillageBgImage={(img) => {
+          setVillageBgImage(img);
+          savePortalSettingsToFirestore({ villageBgImage: img }).catch(() => {});
+        }}
         onToggleVerifyProfile={handleToggleVerifyProfile}
         onDeleteProfile={handleDeleteProfile}
         onSaveProfile={handleSaveProfile}

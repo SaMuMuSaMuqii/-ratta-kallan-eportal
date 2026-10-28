@@ -362,92 +362,71 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
     <div
       className={
         isInlineHomeScreen
-          ? 'bg-stone-50 border-3 border-emerald-700 rounded-3xl overflow-hidden shadow-xl mb-3 font-nastaliq'
+          ? 'bg-stone-50 border-2 border-emerald-700 rounded-3xl overflow-hidden shadow-lg font-nastaliq'
           : 'bg-stone-50 border-4 border-emerald-600 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl my-auto flex flex-col max-h-[95vh] font-nastaliq'
       }
     >
       {/* Top Header */}
-      <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white p-3.5 sm:p-4 flex items-center justify-between border-b-2 border-amber-400">
-        <div className="flex items-center gap-2.5">
-          <div className="w-11 h-11 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center shadow-md shrink-0">
-            <Mic className="w-6 h-6" />
+      <div className="bg-gradient-to-r from-emerald-950 via-emerald-900 to-teal-900 text-white p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2.5 border-b-2 border-amber-400">
+        <div className="flex items-center gap-2.5 min-w-0">
+          <div className="w-10 h-10 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center shadow-md shrink-0">
+            <Mic className="w-5 h-5" />
           </div>
-          <div>
-            <h2 className="text-lg sm:text-xl font-bold text-amber-300 leading-tight">
+          <div className="min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-amber-300 leading-tight truncate">
               بول کر پوچھیں (رتہ کلاں مددگار)
             </h2>
-            <p className="text-xs text-emerald-100">
+            <p className="text-[11px] sm:text-xs text-emerald-100 truncate">
               بزرگوں اور سب گاؤں والوں کے لیے مفت صوتی مددگار
             </p>
           </div>
         </div>
 
-        {onClose && !isInlineHomeScreen && (
-          <button
-            type="button"
-            onClick={onClose}
-            className="min-w-[48px] min-h-[48px] rounded-2xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer"
-            title="بند کریں"
-          >
-            <X className="w-6 h-6" />
-          </button>
-        )}
-      </div>
-
-      {/* Main Content */}
-      <div className="p-3.5 sm:p-5 overflow-y-auto space-y-4">
-        {/* Language Buttons (اردو default, پنجابی, English) + Mic Test ("مائیک ٹیسٹ") */}
-        <div className="flex flex-wrap items-center justify-between gap-2 bg-white p-2.5 rounded-2xl border border-stone-200 shadow-2xs">
-          <div className="flex items-center gap-1.5 flex-wrap">
+        {/* Inline Language & Mic Test Controls on Header when on Home Screen */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(['ur', 'pa', 'en'] as Language[]).map((lKey) => (
             <button
+              key={lKey}
               type="button"
-              onClick={() => handleSelectLanguage('ur')}
-              className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-sm font-bold transition cursor-pointer ${
-                selectedLang === 'ur'
-                  ? 'bg-emerald-700 text-white shadow'
-                  : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-              }`}
+              onClick={() => handleSelectLanguage(lKey)}
+              className={`min-h-[34px] px-2.5 py-1 rounded-xl text-xs font-bold transition cursor-pointer ${
+                selectedLang === lKey
+                  ? 'bg-amber-400 text-stone-950 shadow'
+                  : 'bg-white/10 text-emerald-100 hover:bg-white/20 border border-white/15'
+              } ${lKey === 'en' ? 'font-sans' : ''}`}
             >
-              اردو
+              {lKey === 'ur' ? 'اردو' : lKey === 'pa' ? 'پنجابی' : 'EN'}
             </button>
-            <button
-              type="button"
-              onClick={() => handleSelectLanguage('pa')}
-              className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-sm font-bold transition cursor-pointer ${
-                selectedLang === 'pa'
-                  ? 'bg-emerald-700 text-white shadow'
-                  : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-              }`}
-            >
-              پنجابی
-            </button>
-            <button
-              type="button"
-              onClick={() => handleSelectLanguage('en')}
-              className={`min-h-[44px] px-3.5 py-1.5 rounded-xl text-sm font-bold font-sans transition cursor-pointer ${
-                selectedLang === 'en'
-                  ? 'bg-emerald-700 text-white shadow'
-                  : 'bg-stone-100 text-stone-800 hover:bg-stone-200'
-              }`}
-            >
-              English
-            </button>
-          </div>
+          ))}
 
           <button
             type="button"
             onClick={handleMicTest}
-            className="min-h-[44px] px-3 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-400 text-xs sm:text-sm font-bold flex items-center gap-1.5 cursor-pointer transition"
+            className="min-h-[34px] px-2.5 py-1 rounded-xl bg-emerald-800 hover:bg-emerald-700 text-amber-200 border border-emerald-500/60 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
           >
-            <Sparkles className="w-4 h-4 text-amber-700" />
+            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
             <span>مائیک ٹیسٹ</span>
           </button>
-        </div>
 
+          {onClose && !isInlineHomeScreen && (
+            <button
+              type="button"
+              onClick={onClose}
+              className="min-w-[40px] min-h-[40px] rounded-xl bg-white/15 hover:bg-white/25 text-white flex items-center justify-center transition cursor-pointer"
+              title="بند کریں"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Main Content */}
+      <div className={`${isInlineHomeScreen ? 'p-3 sm:p-4 space-y-3' : 'p-3.5 sm:p-5 space-y-4'} overflow-y-auto`}>
         {/* Punjabi Fallback Notice (Never fail silently, never switch to Hindi) */}
         {punjabiNoticeUrdu && (
-          <div className="bg-amber-50 border-2 border-amber-400 rounded-2xl p-3 text-amber-950 text-sm font-bold leading-relaxed flex items-start gap-2.5">
-            <AlertTriangle className="w-5 h-5 text-amber-700 shrink-0 mt-0.5" />
+          <div className="bg-amber-50 border-2 border-amber-400 rounded-2xl p-3 text-amber-950 text-xs sm:text-sm font-bold leading-relaxed flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
             <span>{punjabiNoticeUrdu}</span>
           </div>
         )}
@@ -455,7 +434,7 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
         {/* Mic Test Result Banner */}
         {micTestStatus !== 'idle' && micTestMessage && (
           <div
-            className={`rounded-2xl p-3 text-sm font-bold border-2 flex items-start justify-between gap-2 ${
+            className={`rounded-2xl p-3 text-xs sm:text-sm font-bold border-2 flex items-start justify-between gap-2 ${
               micTestStatus === 'ok'
                 ? 'bg-emerald-50 border-emerald-500 text-emerald-950'
                 : micTestStatus === 'failed'
@@ -474,44 +453,77 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
           </div>
         )}
 
-        {/* VERY BIG MICROPHONE BUTTON (>= 56px, built at 80px height; 1 tap = immediately speaks) */}
-        <div className="text-center">
-          <button
-            type="button"
-            onClick={handleTapMicrophone}
-            className={`w-full min-h-[80px] py-4 px-5 rounded-3xl font-bold text-xl sm:text-2xl shadow-xl border-4 flex items-center justify-center gap-3.5 transition active:scale-98 cursor-pointer ${
-              isListening
-                ? 'bg-red-600 hover:bg-red-700 text-white border-amber-300 animate-pulse'
-                : 'bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-700 hover:from-emerald-800 hover:to-teal-800 text-white border-amber-400'
-            }`}
+        {/* Primary Action Row: Big Microphone Button + Direct Text Input side-by-side on Desktop */}
+        <div className={isInlineHomeScreen ? 'grid grid-cols-1 lg:grid-cols-12 gap-2.5 items-stretch' : 'space-y-3'}>
+          <div className={isInlineHomeScreen ? 'lg:col-span-6 flex' : 'text-center'}>
+            <button
+              type="button"
+              onClick={handleTapMicrophone}
+              className={`w-full ${
+                isInlineHomeScreen ? 'min-h-[64px] py-3 px-4 rounded-2xl text-base sm:text-lg' : 'min-h-[80px] py-4 px-5 rounded-3xl text-xl sm:text-2xl'
+              } font-bold shadow-lg border-2 flex items-center justify-center gap-3 transition active:scale-98 cursor-pointer ${
+                isListening
+                  ? 'bg-red-600 hover:bg-red-700 text-white border-amber-300 animate-pulse'
+                  : 'bg-gradient-to-r from-emerald-700 via-emerald-600 to-teal-700 hover:from-emerald-800 hover:to-teal-800 text-white border-amber-400'
+              }`}
+            >
+              <div className={`${isInlineHomeScreen ? 'w-11 h-11 rounded-xl' : 'w-14 h-14 rounded-2xl'} bg-white text-emerald-900 flex items-center justify-center shadow shrink-0`}>
+                {isListening ? (
+                  <MicOff className={`${isInlineHomeScreen ? 'w-6 h-6' : 'w-8 h-8'} text-red-600 animate-bounce`} />
+                ) : (
+                  <Mic className={`${isInlineHomeScreen ? 'w-6 h-6' : 'w-8 h-8'} text-emerald-700`} />
+                )}
+              </div>
+              <div className="text-right min-w-0">
+                <span className={`block ${isInlineHomeScreen ? 'text-base sm:text-lg' : 'text-xl sm:text-2xl'} font-bold leading-snug`}>
+                  {isListening ? 'اب بولیں... (سن رہا ہے)' : '🎤 بول کر پوچھیں'}
+                </span>
+                <span className="block text-[11px] sm:text-xs text-emerald-100 font-normal">
+                  {isListening
+                    ? 'بات مکمل ہونے پر خود جواب ملے گا'
+                    : 'یہاں ایک بار دبائیں اور اپنا سوال بولیں'}
+                </span>
+              </div>
+            </button>
+          </div>
+
+          {/* Typing Fallback Box */}
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (manualInput.trim()) {
+                processQuestion(manualInput);
+                setManualInput('');
+              }
+            }}
+            className={`${
+              isInlineHomeScreen ? 'lg:col-span-6' : ''
+            } bg-white p-2 rounded-2xl border border-stone-300 flex items-center gap-2 shadow-2xs`}
           >
-            <div className="w-14 h-14 rounded-2xl bg-white text-emerald-900 flex items-center justify-center shadow-md shrink-0">
-              {isListening ? (
-                <MicOff className="w-8 h-8 text-red-600 animate-bounce" />
-              ) : (
-                <Mic className="w-8 h-8 text-emerald-700" />
-              )}
-            </div>
-            <div className="text-right">
-              <span className="block text-xl sm:text-2xl font-bold leading-snug">
-                {isListening ? 'اب بولیں... (سن رہا ہے)' : '🎤 بول کر پوچھیں'}
-              </span>
-              <span className="block text-xs sm:text-sm text-emerald-100 font-normal">
-                {isListening
-                  ? 'بات مکمل ہونے پر خود جواب ملے گا'
-                  : 'یہاں ایک بار دبائیں اور اپنا سوال بولیں'}
-              </span>
-            </div>
-          </button>
+            <input
+              type="text"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              placeholder="یا اپنا سوال یہاں لکھیں (مثلاً: بجلی والا، مستری، ہسپتال)..."
+              className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-stone-100 text-stone-900 text-xs sm:text-sm font-bold focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            />
+            <button
+              type="submit"
+              className="min-h-[44px] px-3.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm rounded-xl flex items-center gap-1.5 shrink-0 cursor-pointer transition"
+            >
+              <Send className="w-4 h-4" />
+              <span>پوچھیں</span>
+            </button>
+          </form>
         </div>
 
         {/* LIVE SPOKEN WORDS IN LARGE TEXT */}
         {(isListening || liveWords) && (
-          <div className="bg-white border-2 border-emerald-500 rounded-2xl p-4 text-center shadow-sm">
+          <div className="bg-white border-2 border-emerald-500 rounded-2xl p-3 sm:p-4 text-center shadow-sm">
             <span className="text-xs font-bold text-stone-500 block mb-1">
               آپ کے بولے گئے الفاظ:
             </span>
-            <p className="text-xl sm:text-2xl font-bold text-stone-900 leading-relaxed">
+            <p className="text-lg sm:text-xl font-bold text-stone-900 leading-relaxed break-words">
               {liveWords || 'سن رہا ہے... براہ کرم بولیں'}
             </p>
           </div>
@@ -519,17 +531,17 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
 
         {/* CLEAR URDU ERROR MESSAGE WITH RETRY BUTTON */}
         {errorBannerUrdu && (
-          <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-4 space-y-3 text-right shadow-sm">
-            <div className="flex items-start gap-2.5 text-red-950">
-              <AlertTriangle className="w-6 h-6 text-red-600 shrink-0 mt-0.5" />
-              <p className="text-base font-bold leading-relaxed">{errorBannerUrdu}</p>
+          <div className="bg-red-50 border-2 border-red-400 rounded-2xl p-3.5 space-y-2.5 text-right shadow-sm">
+            <div className="flex items-start gap-2 text-red-950">
+              <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+              <p className="text-sm sm:text-base font-bold leading-relaxed">{errorBannerUrdu}</p>
             </div>
             <button
               type="button"
               onClick={handleTapMicrophone}
-              className="w-full min-h-[56px] bg-red-600 hover:bg-red-700 text-white font-bold text-base rounded-2xl shadow flex items-center justify-center gap-2 cursor-pointer transition"
+              className="w-full min-h-[48px] bg-red-600 hover:bg-red-700 text-white font-bold text-sm rounded-2xl shadow flex items-center justify-center gap-2 cursor-pointer transition"
             >
-              <RefreshCw className="w-5 h-5" />
+              <RefreshCw className="w-4 h-4" />
               <span>دوبارہ کوشش کریں</span>
             </button>
           </div>
@@ -537,35 +549,49 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
 
         {/* ANSWER CARD + POST-ANSWER ACTION BUTTONS + CALL BUTTONS */}
         {currentAnswer && (
-          <div className="bg-emerald-50/90 border-2 border-emerald-600 rounded-3xl p-4 space-y-4 shadow-md">
+          <div className="bg-emerald-50/90 border-2 border-emerald-600 rounded-3xl p-3.5 sm:p-4 space-y-3.5 shadow-md">
             <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
-              <span className="text-sm font-bold text-emerald-900 flex items-center gap-1.5">
-                <CheckCircle2 className="w-5 h-5 text-emerald-700" />
+              <span className="text-xs sm:text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700" />
                 <span>رتہ کلاں پورٹل کا جواب:</span>
               </span>
-              {isSpeakingAnswer && (
+              <div className="flex items-center gap-1.5">
+                {isSpeakingAnswer && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopSpeaking();
+                      setIsSpeakingAnswer(false);
+                    }}
+                    className="px-2.5 py-1 rounded-xl bg-red-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  >
+                    <VolumeX className="w-3.5 h-3.5" />
+                    <span>آواز روکیں</span>
+                  </button>
+                )}
                 <button
                   type="button"
                   onClick={() => {
                     stopSpeaking();
                     setIsSpeakingAnswer(false);
+                    setCurrentAnswer(null);
+                    setLiveWords('');
                   }}
-                  className="px-3 py-1 rounded-xl bg-red-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                  className="px-2.5 py-1 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 text-xs font-bold cursor-pointer"
                 >
-                  <VolumeX className="w-4 h-4" />
-                  <span>آواز روکیں</span>
+                  صاف کریں ✕
                 </button>
-              )}
+              </div>
             </div>
 
             {/* Large Answer Text */}
-            <div className="text-lg sm:text-xl font-bold text-stone-900 leading-loose whitespace-pre-line bg-white p-3.5 rounded-2xl border border-emerald-200">
+            <div className="text-base sm:text-lg font-bold text-stone-900 leading-loose whitespace-pre-line bg-white p-3.5 rounded-2xl border border-emerald-200 break-words">
               {currentAnswer.displayText}
             </div>
 
             {/* How-To Target Button Highlight */}
             {currentAnswer.buttonToTap && (
-              <div className="bg-amber-100 border-2 border-amber-500 text-stone-950 p-3 rounded-2xl text-sm sm:text-base font-extrabold flex items-center justify-between gap-2">
+              <div className="bg-amber-100 border-2 border-amber-500 text-stone-950 p-3 rounded-2xl text-xs sm:text-sm font-extrabold flex items-center justify-between gap-2 flex-wrap">
                 <span>👉 یہ بٹن دبائیں:</span>
                 <span className="bg-emerald-800 text-amber-300 px-3 py-1 rounded-xl">
                   {currentAnswer.buttonToTap}
@@ -575,7 +601,7 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
 
             {/* Staleness Warning if old */}
             {currentAnswer.stalenessNotice && (
-              <div className="bg-amber-100 border border-amber-400 text-amber-950 px-3 py-2 rounded-xl text-sm font-bold flex items-center gap-2">
+              <div className="bg-amber-100 border border-amber-400 text-amber-950 px-3 py-2 rounded-xl text-xs sm:text-sm font-bold flex items-center gap-2">
                 <Clock className="w-4 h-4 text-amber-800 shrink-0" />
                 <span>{currentAnswer.stalenessNotice}</span>
               </div>
@@ -589,7 +615,7 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                     key={opt}
                     type="button"
                     onClick={() => processQuestion(opt)}
-                    className="min-h-[56px] p-3 rounded-2xl bg-amber-400 hover:bg-amber-500 text-stone-950 font-bold text-base shadow border-2 border-amber-600 cursor-pointer transition"
+                    className="min-h-[48px] p-2.5 rounded-2xl bg-amber-400 hover:bg-amber-500 text-stone-950 font-bold text-sm shadow border-2 border-amber-600 cursor-pointer transition"
                   >
                     {opt}
                   </button>
@@ -608,13 +634,13 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                     key={mItem.id}
                     className="bg-white border-2 border-emerald-500 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs"
                   >
-                    <div className="text-right space-y-0.5">
+                    <div className="text-right space-y-0.5 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-base text-stone-900">
+                        <span className="font-extrabold text-sm sm:text-base text-stone-900">
                           {mItem.title}
                         </span>
                         {mItem.badgeText && (
-                          <span className="text-[11px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
+                          <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
                             {mItem.badgeText}
                           </span>
                         )}
@@ -632,9 +658,9 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                     {mItem.phone && (
                       <a
                         href={`tel:${mItem.phone.replace(/[^0-9+]/g, '')}`}
-                        className="min-h-[56px] px-5 py-3 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-base rounded-2xl shadow-md flex items-center justify-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
+                        className="min-h-[48px] px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-sm rounded-2xl shadow-md flex items-center justify-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
                       >
-                        <PhoneCall className="w-5 h-5" />
+                        <PhoneCall className="w-4 h-4" />
                         <span>فون کریں</span>
                       </a>
                     )}
@@ -655,8 +681,8 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                       key={`${item.phone}-${idx}`}
                       className="bg-white border-2 border-emerald-400 rounded-2xl p-3 flex items-center justify-between gap-2 shadow-2xs"
                     >
-                      <div className="text-right overflow-hidden">
-                        <div className="font-bold text-base text-stone-900 truncate">
+                      <div className="text-right overflow-hidden min-w-0">
+                        <div className="font-bold text-sm sm:text-base text-stone-900 truncate">
                           {item.label}
                         </div>
                         <div className="font-mono font-bold text-sm text-emerald-800" dir="ltr">
@@ -669,9 +695,9 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
 
                       <a
                         href={`tel:${item.phone.replace(/[^0-9+]/g, '')}`}
-                        className="min-h-[56px] px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-base rounded-2xl shadow flex items-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
+                        className="min-h-[48px] px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm rounded-2xl shadow flex items-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
                       >
-                        <PhoneCall className="w-5 h-5" />
+                        <PhoneCall className="w-4 h-4" />
                         <span>فون کریں</span>
                       </a>
                     </div>
@@ -687,7 +713,7 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                   key={followUpQ}
                   type="button"
                   onClick={() => processQuestion(followUpQ)}
-                  className="min-h-[42px] px-3.5 py-1.5 rounded-xl bg-white hover:bg-amber-100 text-emerald-950 border-2 border-emerald-500 text-xs sm:text-sm font-bold cursor-pointer transition"
+                  className="min-h-[38px] px-3 py-1 rounded-xl bg-white hover:bg-amber-100 text-emerald-950 border-2 border-emerald-500 text-xs font-bold cursor-pointer transition"
                 >
                   {followUpQ}
                 </button>
@@ -695,109 +721,92 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
             </div>
 
             {/* 3 Post-Answer Control Buttons: دوبارہ سنیں | آہستہ سنیں | دوبارہ پوچھیں */}
-            <div className="grid grid-cols-3 gap-2 pt-2">
+            <div className="grid grid-cols-3 gap-2 pt-1">
               <button
                 type="button"
                 onClick={() => speakAnswerAloud(currentAnswer.spokenText, false)}
-                className="min-h-[56px] p-2.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm sm:text-base shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
+                className="min-h-[48px] p-2 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
               >
-                <Volume2 className="w-5 h-5" />
+                <Volume2 className="w-4 h-4" />
                 <span>دوبارہ سنیں</span>
               </button>
 
               <button
                 type="button"
                 onClick={() => speakAnswerAloud(currentAnswer.spokenText, true)}
-                className="min-h-[56px] p-2.5 rounded-2xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-sm sm:text-base shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
+                className="min-h-[48px] p-2 rounded-2xl bg-amber-500 hover:bg-amber-600 text-stone-950 font-bold text-xs sm:text-sm shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
               >
-                <Volume2 className="w-5 h-5" />
+                <Volume2 className="w-4 h-4" />
                 <span>آہستہ سنیں</span>
               </button>
 
               <button
                 type="button"
                 onClick={handleTapMicrophone}
-                className="min-h-[56px] p-2.5 rounded-2xl bg-stone-800 hover:bg-stone-900 text-white font-bold text-sm sm:text-base shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
+                className="min-h-[48px] p-2 rounded-2xl bg-stone-800 hover:bg-stone-900 text-white font-bold text-xs sm:text-sm shadow flex flex-col items-center justify-center gap-1 cursor-pointer transition active:scale-95"
               >
-                <Mic className="w-5 h-5 text-amber-300" />
+                <Mic className="w-4 h-4 text-amber-300" />
                 <span>دوبارہ پوچھیں</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* BIG EXAMPLE BUTTONS TO TAP INSTEAD OF SPEAKING */}
-        <div className="space-y-2.5">
-          <div className="flex items-center gap-1.5 text-stone-700 font-bold text-sm px-1">
-            <HelpCircle className="w-4 h-4 text-emerald-700" />
-            <span>بولنے کے بجائے نیچے بڑا بٹن دبا کر بھی پوچھ سکتے ہیں:</span>
+        {/* EXAMPLE QUESTIONS TO TAP INSTEAD OF SPEAKING */}
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1.5 text-stone-700 font-bold text-xs px-1">
+            <HelpCircle className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+            <span>بولنے کے بجائے نیچے بٹن دبا کر بھی پوچھ سکتے ہیں:</span>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+          <div
+            className={
+              isInlineHomeScreen
+                ? 'grid grid-cols-2 sm:grid-cols-3 gap-2'
+                : 'grid grid-cols-1 sm:grid-cols-2 gap-2.5'
+            }
+          >
             {DEFAULT_EXAMPLE_QUESTIONS.map((exampleText) => (
               <button
                 key={exampleText}
                 type="button"
                 onClick={() => processQuestion(exampleText)}
-                className="min-h-[58px] px-4 py-3 rounded-2xl bg-white hover:bg-emerald-50 text-stone-900 font-bold text-base sm:text-lg border-2 border-emerald-400 shadow-sm flex items-center justify-between gap-2 text-right cursor-pointer transition active:scale-98"
+                className={`${
+                  isInlineHomeScreen
+                    ? 'min-h-[44px] px-3 py-2 text-xs sm:text-sm'
+                    : 'min-h-[54px] px-4 py-2.5 text-sm sm:text-base'
+                } rounded-2xl bg-white hover:bg-emerald-50 text-stone-900 font-bold border border-emerald-400 shadow-2xs flex items-center justify-between gap-1.5 text-right cursor-pointer transition active:scale-98`}
               >
-                <span>{exampleText}</span>
-                <Volume2 className="w-5 h-5 text-emerald-700 shrink-0" />
+                <span className="truncate">{exampleText}</span>
+                <Volume2 className="w-4 h-4 text-emerald-700 shrink-0" />
               </button>
             ))}
           </div>
         </div>
 
-        {/* Typing Fallback Box (Always works offline & without mic) */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (manualInput.trim()) {
-              processQuestion(manualInput);
-              setManualInput('');
-            }
-          }}
-          className="bg-white p-2.5 rounded-2xl border border-stone-300 flex gap-2"
-        >
-          <input
-            type="text"
-            value={manualInput}
-            onChange={(e) => setManualInput(e.target.value)}
-            placeholder="یا اپنا سوال یہاں لکھیں (مثلاً: بجلی والا، مستری، ہسپتال)..."
-            className="flex-1 px-3 py-2.5 rounded-xl bg-stone-100 text-stone-900 text-sm sm:text-base font-bold focus:outline-none focus:ring-2 focus:ring-emerald-600"
-          />
-          <button
-            type="submit"
-            className="min-h-[48px] px-4 bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm rounded-xl flex items-center gap-1.5 shrink-0 cursor-pointer"
-          >
-            <Send className="w-4 h-4" />
-            <span>پوچھیں</span>
-          </button>
-        </form>
-
         {/* Recent Questions Stored on Phone (With Clear Button, Zero Audio Saved) */}
         {recentQuestions.length > 0 && (
-          <div className="bg-stone-100 rounded-2xl p-3 space-y-2 border border-stone-200">
+          <div className="bg-stone-100 rounded-2xl p-2.5 space-y-1.5 border border-stone-200">
             <div className="flex items-center justify-between">
-              <span className="text-xs font-bold text-stone-600">
+              <span className="text-[11px] font-bold text-stone-600">
                 آپ کے حالیہ سوالات (صرف آپ کے فون پر):
               </span>
               <button
                 type="button"
                 onClick={handleClearRecentQuestions}
-                className="text-xs font-bold text-red-700 hover:underline flex items-center gap-1 cursor-pointer"
+                className="text-[11px] font-bold text-red-700 hover:underline flex items-center gap-1 cursor-pointer"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>حالیہ سوالات صاف کریں</span>
+                <Trash2 className="w-3 h-3" />
+                <span>صاف کریں</span>
               </button>
             </div>
-            <div className="flex flex-wrap gap-1.5">
+            <div className="quick-search-container flex flex-wrap gap-2">
               {recentQuestions.map((rq) => (
                 <button
                   key={rq}
                   type="button"
                   onClick={() => processQuestion(rq)}
-                  className="px-3 py-1.5 rounded-xl bg-white border border-stone-300 text-stone-800 text-xs sm:text-sm font-bold hover:bg-emerald-50 cursor-pointer"
+                  className="px-2.5 py-1 rounded-xl bg-white border border-stone-300 text-stone-800 text-xs font-bold hover:bg-emerald-50 cursor-pointer shrink-0"
                 >
                   {rq}
                 </button>

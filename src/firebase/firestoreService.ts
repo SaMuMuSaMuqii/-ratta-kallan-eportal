@@ -1,5 +1,6 @@
 import {
   db,
+  auth,
   storage,
   collection,
   doc,
@@ -25,6 +26,9 @@ import {
   VillageTransport,
   VillageHospital,
   VillageMessage,
+  PortalNotificationItem,
+  UserNotificationSettings,
+  PushSubscriptionDoc,
   AdminAlertItem,
   RoleAssignmentDoc,
   AdminLogEntry,
@@ -164,29 +168,88 @@ export async function compressImageFile(file: File, maxWidth = 1200, quality = 0
  * Returns a small dataUrl to be stored in a separate document (bannerImages/{eventId}),
  * never in Cloud Storage and never inside the newsEvents list document.
  */
-export async function compressBannerImageToUnder80KB(
-  file: File
-): Promise<{ dataUrl: string; width: number; height: number; byteSize: number }> {
+export interface BannerCropOptions {
+  aspectRatio?: '16:9' | '21:9' | '4:3' | 'auto';
+  focalX?: number; // 0-100 (default 50)
+  focalY?: number; // 0-100 (default 50)
+  zoom?: number; // 1.0 - 2.0 (default 1.0)
+  isMobileVariant?: boolean;
+}
+
+/**
+ * Crop (without stretching or distorting) and compress a banner image (File or dataUrl)
+ * to 400–800 px wide and strictly under 80 KB.
+ */
+export async function cropAndCompressBannerImage(
+  source: File | string,
+  options: BannerCropOptions = {}
+): Promise<{
+  dataUrl: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  originalWidth: number;
+  originalHeight: number;
+}> {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.readAsDataURL(file);
-    reader.onload = (event) => {
+    const loadImg = (srcUrl: string) => {
       const img = new Image();
-      img.src = event.target?.result as string;
+      img.crossOrigin = 'anonymous';
+      img.src = srcUrl;
       img.onload = () => {
-        // Clamp target width between 400 and 800 px
-        let targetWidth = img.width;
-        let targetHeight = img.height;
-        if (targetWidth > 720) {
-          targetHeight = Math.round((targetHeight * 720) / targetWidth);
-          targetWidth = 720;
+        const origW = img.naturalWidth || img.width || 640;
+        const origH = img.naturalHeight || img.height || 360;
+
+        const aspectPref = options.aspectRatio || 'auto';
+        const focalX = Math.max(0, Math.min(100, options.focalX ?? 50)) / 100;
+        const focalY = Math.max(0, Math.min(100, options.focalY ?? 50)) / 100;
+        const zoom = Math.max(1, Math.min(2, options.zoom ?? 1));
+
+        // Compute source crop rectangle (sx, sy, sw, sh) without ever stretching pixels
+        let desiredRatio = origW / origH;
+        if (aspectPref === '16:9') desiredRatio = 16 / 9;
+        else if (aspectPref === '21:9') desiredRatio = 21 / 9;
+        else if (aspectPref === '4:3') desiredRatio = 4 / 3;
+
+        let baseSw = origW;
+        let baseSh = origH;
+        const currentRatio = origW / origH;
+
+        if (aspectPref !== 'auto') {
+          if (currentRatio > desiredRatio) {
+            // Source is wider than target aspect ratio -> crop width
+            baseSw = Math.round(origH * desiredRatio);
+            baseSh = origH;
+          } else {
+            // Source is taller than target aspect ratio -> crop height
+            baseSw = origW;
+            baseSh = Math.round(origW / desiredRatio);
+          }
+        }
+
+        // Apply zoom factor cleanly around focal point
+        const sw = Math.max(64, Math.round(baseSw / zoom));
+        const sh = Math.max(64, Math.round(baseSh / zoom));
+
+        const maxSx = Math.max(0, origW - sw);
+        const maxSy = Math.max(0, origH - sh);
+        const sx = Math.round(maxSx * focalX);
+        const sy = Math.round(maxSy * focalY);
+
+        // Determine target output dimensions (400-760 px wide)
+        const maxTargetW = options.isMobileVariant ? 600 : 760;
+        let targetWidth = sw;
+        let targetHeight = sh;
+        if (targetWidth > maxTargetW) {
+          targetHeight = Math.max(180, Math.round((targetHeight * maxTargetW) / targetWidth));
+          targetWidth = maxTargetW;
         } else if (targetWidth < 400 && targetWidth > 0) {
-          targetHeight = Math.round((targetHeight * 400) / targetWidth);
+          targetHeight = Math.max(180, Math.round((targetHeight * 400) / targetWidth));
           targetWidth = 400;
         }
 
         const canvas = document.createElement('canvas');
-        let quality = 0.72;
+        let quality = 0.76;
         let currentW = targetWidth;
         let currentH = targetHeight;
         let dataUrl = '';
@@ -201,22 +264,20 @@ export async function compressBannerImageToUnder80KB(
             return;
           }
           ctx.clearRect(0, 0, currentW, currentH);
-          ctx.drawImage(img, 0, 0, currentW, currentH);
+          ctx.drawImage(img, sx, sy, sw, sh, 0, 0, currentW, currentH);
           dataUrl = canvas.toDataURL('image/jpeg', quality);
-          // Calculate actual binary byte size from base64 length
           const base64Part = dataUrl.split(',')[1] || '';
           byteSize = Math.ceil((base64Part.length * 3) / 4);
 
           if (byteSize <= MAX_BANNER_IMAGE_BYTES && dataUrl.length <= 108000) {
             break;
           }
-          // Step down quality and width while keeping width >= 400 px
-          quality = Math.max(0.35, quality - 0.12);
-          if (currentW > 480) {
-            currentH = Math.round((currentH * 480) / currentW);
-            currentW = 480;
+          quality = Math.max(0.36, quality - 0.12);
+          if (currentW > 520) {
+            currentH = Math.max(160, Math.round((currentH * 520) / currentW));
+            currentW = 520;
           } else if (currentW > 400) {
-            currentH = Math.round((currentH * 400) / currentW);
+            currentH = Math.max(150, Math.round((currentH * 400) / currentW));
             currentW = 400;
           }
         }
@@ -226,12 +287,41 @@ export async function compressBannerImageToUnder80KB(
           width: currentW,
           height: currentH,
           byteSize,
+          originalWidth: origW,
+          originalHeight: origH,
         });
       };
       img.onerror = (err) => reject(err);
     };
-    reader.onerror = (err) => reject(err);
+
+    if (typeof source === 'string') {
+      loadImg(source);
+    } else {
+      const reader = new FileReader();
+      reader.readAsDataURL(source);
+      reader.onload = (event) => loadImg(event.target?.result as string);
+      reader.onerror = (err) => reject(err);
+    }
   });
+}
+
+/**
+ * Free-plan Banner Rule:
+ * Compress each banner image on the phone to 400–800 px wide and strictly under 80 KB.
+ * Returns a small dataUrl to be stored in a separate document (bannerImages/{eventId}),
+ * never in Cloud Storage and never inside the newsEvents list document.
+ */
+export async function compressBannerImageToUnder80KB(
+  file: File,
+  options: BannerCropOptions = {}
+): Promise<{ dataUrl: string; width: number; height: number; byteSize: number }> {
+  const res = await cropAndCompressBannerImage(file, options);
+  return {
+    dataUrl: res.dataUrl,
+    width: res.width,
+    height: res.height,
+    byteSize: res.byteSize,
+  };
 }
 
 /**
@@ -244,18 +334,33 @@ export async function saveBannerSlideImageDoc(
   if (docData.byteSize > MAX_BANNER_IMAGE_BYTES) {
     throw new Error('بینر تصویر کا سائز 80 KB سے کم ہونا لازمی ہے۔');
   }
+  const cleanDoc = stripUndefined(docData);
   try {
     const raw = localStorage.getItem(LOCAL_BANNER_IMAGES_DOCS_KEY);
     const map: Record<string, BannerSlideImageDoc> = raw ? JSON.parse(raw) : {};
-    map[eventId] = docData;
+    map[eventId] = cleanDoc;
     localStorage.setItem(LOCAL_BANNER_IMAGES_DOCS_KEY, JSON.stringify(map));
   } catch (e) {
     console.warn('Local banner doc save notice:', e);
   }
 
   if (isFirebaseConfigured()) {
-    await setDoc(doc(db, 'bannerImages', eventId), docData, { merge: true });
+    await setDoc(doc(db, 'bannerImages', eventId), cleanDoc, { merge: true });
   }
+}
+
+/**
+ * Store a separate mobile banner image for a slide (`bannerImages/{eventId}_mobile`).
+ */
+export async function saveMobileBannerSlideImageDoc(
+  eventId: string,
+  docData: BannerSlideImageDoc
+): Promise<void> {
+  return saveBannerSlideImageDoc(`${eventId}_mobile`, {
+    ...docData,
+    eventId: `${eventId}_mobile`,
+    isMobileVariant: true,
+  });
 }
 
 /**
@@ -292,7 +397,39 @@ export async function getBannerSlideImageDoc(
 }
 
 /**
- * Remove a banner slide's separate image document (`bannerImages/{eventId}`).
+ * Load the optional mobile-specific banner image document (`bannerImages/{eventId}_mobile`).
+ */
+export async function getMobileBannerSlideImageDoc(
+  eventId: string
+): Promise<BannerSlideImageDoc | null> {
+  return getBannerSlideImageDoc(`${eventId}_mobile`);
+}
+
+/**
+ * Remove only the mobile banner image document (`bannerImages/{eventId}_mobile`).
+ */
+export async function deleteMobileBannerSlideImageDoc(eventId: string): Promise<void> {
+  const mobileKey = `${eventId}_mobile`;
+  try {
+    const raw = localStorage.getItem(LOCAL_BANNER_IMAGES_DOCS_KEY);
+    if (raw) {
+      const map: Record<string, BannerSlideImageDoc> = JSON.parse(raw);
+      delete map[mobileKey];
+      localStorage.setItem(LOCAL_BANNER_IMAGES_DOCS_KEY, JSON.stringify(map));
+    }
+  } catch {}
+
+  if (isFirebaseConfigured()) {
+    try {
+      await deleteDoc(doc(db, 'bannerImages', mobileKey));
+    } catch (e) {
+      console.warn('Delete mobile banner image doc notice:', e);
+    }
+  }
+}
+
+/**
+ * Remove a banner slide's separate image document (`bannerImages/{eventId}`) and its mobile variant.
  */
 export async function deleteBannerSlideImageDoc(eventId: string): Promise<void> {
   try {
@@ -300,6 +437,7 @@ export async function deleteBannerSlideImageDoc(eventId: string): Promise<void> 
     if (raw) {
       const map: Record<string, BannerSlideImageDoc> = JSON.parse(raw);
       delete map[eventId];
+      delete map[`${eventId}_mobile`];
       localStorage.setItem(LOCAL_BANNER_IMAGES_DOCS_KEY, JSON.stringify(map));
     }
   } catch {}
@@ -307,6 +445,7 @@ export async function deleteBannerSlideImageDoc(eventId: string): Promise<void> 
   if (isFirebaseConfigured()) {
     try {
       await deleteDoc(doc(db, 'bannerImages', eventId));
+      await deleteDoc(doc(db, 'bannerImages', `${eventId}_mobile`));
     } catch (e) {
       console.warn('Delete banner image doc notice:', e);
     }
@@ -349,7 +488,151 @@ export function uploadFileWithProgress(
   });
 }
 
+export enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+export interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  };
+}
+
+export function handleFirestoreError(
+  error: unknown,
+  operationType: OperationType,
+  path: string | null
+): void {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid || null,
+      email: auth.currentUser?.email || null,
+      emailVerified: auth.currentUser?.emailVerified ?? null,
+      isAnonymous: auth.currentUser?.isAnonymous ?? null,
+      tenantId: auth.currentUser?.tenantId || null,
+      providerInfo:
+        auth.currentUser?.providerData?.map((provider) => ({
+          providerId: provider.providerId,
+          email: provider.email,
+        })) || [],
+    },
+    operationType,
+    path,
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+}
+
+// Remove undefined properties before writing to Firestore (Firestore rejects undefined values)
+function stripUndefined<T extends Record<string, any>>(obj: T): T {
+  const clean: Record<string, any> = {};
+  Object.keys(obj).forEach((key) => {
+    const val = obj[key];
+    if (val !== undefined) {
+      clean[key] = val;
+    }
+  });
+  return clean as T;
+}
+
 // ================= REAL-TIME FIRESTORE SUBSCRIBERS =================
+
+let hasSeededInitialCollections = false;
+
+export async function ensureInitialFirestoreSeed(seedData: {
+  profiles: VillageProfile[];
+  mosques: VillageMosque[];
+  institutes: VillageInstitute[];
+  transports: VillageTransport[];
+  hospitals: VillageHospital[];
+  newsEvents: VillageNewsEvent[];
+  announcements: VillageAnnouncement[];
+}): Promise<void> {
+  if (!isFirebaseConfigured() || hasSeededInitialCollections) return;
+  hasSeededInitialCollections = true;
+
+  try {
+    // 1. Check and seed profiles if empty
+    const profilesSnap = await getDocs(collection(db, 'profiles'));
+    if (profilesSnap.empty && seedData.profiles.length > 0) {
+      for (const p of seedData.profiles) {
+        const clean = stripUndefined(sanitizePublicProfile(p));
+        await setDoc(doc(db, 'profiles', clean.id), clean, { merge: true });
+      }
+    }
+
+    // 2. Check and seed mosques if empty
+    const mosquesSnap = await getDocs(collection(db, 'mosques'));
+    if (mosquesSnap.empty && seedData.mosques.length > 0) {
+      for (const m of seedData.mosques) {
+        await setDoc(doc(db, 'mosques', m.id), stripUndefined(m), { merge: true });
+      }
+    }
+
+    // 3. Check and seed institutes if empty
+    const instSnap = await getDocs(collection(db, 'institutes'));
+    if (instSnap.empty && seedData.institutes.length > 0) {
+      for (const inst of seedData.institutes) {
+        await setDoc(doc(db, 'institutes', inst.id), stripUndefined(inst), { merge: true });
+      }
+    }
+
+    // 4. Check and seed transports if empty
+    const transSnap = await getDocs(collection(db, 'transports'));
+    if (transSnap.empty && seedData.transports.length > 0) {
+      for (const tr of seedData.transports) {
+        await setDoc(doc(db, 'transports', tr.id), stripUndefined(tr), { merge: true });
+      }
+    }
+
+    // 5. Check and seed hospitals if empty
+    const hospSnap = await getDocs(collection(db, 'hospitals'));
+    if (hospSnap.empty && seedData.hospitals.length > 0) {
+      for (const h of seedData.hospitals) {
+        await setDoc(doc(db, 'hospitals', h.id), stripUndefined(h), { merge: true });
+      }
+    }
+
+    // 6. Check and seed newsEvents & local bannerImages if empty
+    const newsSnap = await getDocs(collection(db, 'newsEvents'));
+    if (newsSnap.empty && seedData.newsEvents.length > 0) {
+      for (const n of seedData.newsEvents) {
+        const { imageData, ...restNews } = n as any;
+        await setDoc(doc(db, 'newsEvents', n.id), stripUndefined(restNews), { merge: true });
+      }
+      // Also upload any locally stored banner images
+      try {
+        const rawBanners = localStorage.getItem(LOCAL_BANNER_IMAGES_DOCS_KEY);
+        if (rawBanners) {
+          const bannerMap: Record<string, BannerSlideImageDoc> = JSON.parse(rawBanners);
+          for (const [evId, bDoc] of Object.entries(bannerMap)) {
+            if (bDoc && bDoc.imageData && bDoc.byteSize <= MAX_BANNER_IMAGE_BYTES) {
+              await setDoc(doc(db, 'bannerImages', evId), stripUndefined(bDoc), { merge: true });
+            }
+          }
+        }
+      } catch {}
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'initialSeed');
+  }
+}
 
 export function subscribeProfiles(onUpdate: (profiles: VillageProfile[]) => void): () => void {
   if (!isFirebaseConfigured()) {
@@ -367,7 +650,7 @@ export function subscribeProfiles(onUpdate: (profiles: VillageProfile[]) => void
         onUpdate(list);
       }
     },
-    (err) => console.warn('Profiles sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'profiles')
   );
 }
 
@@ -383,7 +666,7 @@ export function subscribeNewsEvents(onUpdate: (news: VillageNewsEvent[]) => void
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('News sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'newsEvents')
   );
 }
 
@@ -399,7 +682,7 @@ export function subscribeAnnouncements(onUpdate: (items: VillageAnnouncement[]) 
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('Announcements sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'announcements')
   );
 }
 
@@ -415,7 +698,7 @@ export function subscribeMosques(onUpdate: (mosques: VillageMosque[]) => void): 
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('Mosques sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'mosques')
   );
 }
 
@@ -431,7 +714,7 @@ export function subscribeInstitutes(onUpdate: (institutes: VillageInstitute[]) =
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('Institutes sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'institutes')
   );
 }
 
@@ -447,7 +730,7 @@ export function subscribeTransports(onUpdate: (transports: VillageTransport[]) =
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('Transports sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'transports')
   );
 }
 
@@ -463,7 +746,7 @@ export function subscribeHospitals(onUpdate: (hospitals: VillageHospital[]) => v
       });
       if (list.length > 0) onUpdate(list);
     },
-    (err) => console.warn('Hospitals sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'hospitals')
   );
 }
 
@@ -473,13 +756,44 @@ export function subscribeMessages(onUpdate: (messages: VillageMessage[]) => void
   return onSnapshot(
     q,
     (snapshot) => {
+      recordFirestoreRead(Math.max(1, snapshot.docChanges().length));
       const list: VillageMessage[] = [];
       snapshot.forEach((docSnap) => {
         list.push({ ...(docSnap.data() as VillageMessage), id: docSnap.id });
       });
+      // Sort by latest activity (updatedAt -> replyCreatedAt -> createdAt) descending
+      list.sort((a, b) => {
+        const tA = new Date(a.updatedAt || a.replyCreatedAt || a.createdAt || 0).getTime();
+        const tB = new Date(b.updatedAt || b.replyCreatedAt || b.createdAt || 0).getTime();
+        return tB - tA;
+      });
       onUpdate(list);
     },
-    (err) => console.warn('Messages sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'messages')
+  );
+}
+
+export function subscribeNotifications(
+  onUpdate: (notifications: PortalNotificationItem[]) => void
+): () => void {
+  if (!isFirebaseConfigured()) return () => {};
+  const q = collection(db, 'notifications');
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      recordFirestoreRead(Math.max(1, snapshot.docChanges().length));
+      const list: PortalNotificationItem[] = [];
+      snapshot.forEach((docSnap) => {
+        list.push({ ...(docSnap.data() as PortalNotificationItem), id: docSnap.id });
+      });
+      list.sort((a, b) => {
+        const tA = new Date(a.createdAt || 0).getTime();
+        const tB = new Date(b.createdAt || 0).getTime();
+        return tB - tA;
+      });
+      onUpdate(list);
+    },
+    (err) => handleFirestoreError(err, OperationType.LIST, 'notifications')
   );
 }
 
@@ -495,8 +809,43 @@ export function subscribeAlerts(onUpdate: (alerts: AdminAlertItem[]) => void): (
       });
       onUpdate(list);
     },
-    (err) => console.warn('Alerts sync notice:', err)
+    (err) => handleFirestoreError(err, OperationType.LIST, 'adminAlerts')
   );
+}
+
+export function subscribePortalSettings(
+  onUpdate: (settingsData: Record<string, any>) => void
+): () => void {
+  if (!isFirebaseConfigured()) return () => {};
+  const docRef = doc(db, 'settings', 'portalSharedState');
+  return onSnapshot(
+    docRef,
+    (snap) => {
+      if (snap.exists()) {
+        onUpdate(snap.data() as Record<string, any>);
+      }
+    },
+    (err) => handleFirestoreError(err, OperationType.GET, 'settings/portalSharedState')
+  );
+}
+
+export async function savePortalSettingsToFirestore(
+  partialSettings: Record<string, any>
+): Promise<void> {
+  if (!isFirebaseConfigured()) return;
+  try {
+    recordFirestoreWrite(1);
+    await setDoc(
+      doc(db, 'settings', 'portalSharedState'),
+      stripUndefined({
+        ...partialSettings,
+        updatedAt: new Date().toISOString(),
+      }),
+      { merge: true }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, 'settings/portalSharedState');
+  }
 }
 
 // ================= ROLES ("roles" collection) & ADMIN LOG ("ایڈمن لاگ") =================
@@ -604,48 +953,167 @@ export async function appendAdminLogEntry(
 export async function saveProfileToFirestore(profile: VillageProfile): Promise<void> {
   recordFirestoreWrite(1);
   if (!isFirebaseConfigured()) return;
-  // Strictly strip email, username, and password from public profiles collection
-  const publicSafeProfile = sanitizePublicProfile(profile);
-  const docRef = doc(db, 'profiles', publicSafeProfile.id);
-  await setDoc(docRef, publicSafeProfile, { merge: true });
+  try {
+    // Strictly strip email, username, and password from public profiles collection
+    const publicSafeProfile = stripUndefined(sanitizePublicProfile(profile));
+    const docRef = doc(db, 'profiles', publicSafeProfile.id);
+    await setDoc(docRef, publicSafeProfile, { merge: true });
 
-  // Store private email/username (never password!) in profilePrivate/{uid} if owner exists
-  if (profile.ownerUid && (profile.email || profile.username)) {
-    const privateDocRef = doc(db, 'profilePrivate', profile.ownerUid);
-    await setDoc(
-      privateDocRef,
-      {
-        ownerUid: profile.ownerUid,
-        profileId: profile.id,
-        email: profile.email || '',
-        username: profile.username || '',
-        bloodGroup: profile.bloodGroup || '',
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    // Store private email/username (never password!) in profilePrivate/{uid} if owner exists
+    if (profile.ownerUid && (profile.email || profile.username)) {
+      const privateDocRef = doc(db, 'profilePrivate', profile.ownerUid);
+      await setDoc(
+        privateDocRef,
+        {
+          ownerUid: profile.ownerUid,
+          profileId: profile.id,
+          email: profile.email || '',
+          username: profile.username || '',
+          bloodGroup: profile.bloodGroup || '',
+          updatedAt: new Date().toISOString(),
+        },
+        { merge: true }
+      );
+    }
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `profiles/${profile.id}`);
   }
 }
 
 export async function deleteProfileFromFirestore(profileId: string): Promise<void> {
   recordFirestoreWrite(1);
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'profiles', profileId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'profiles', profileId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `profiles/${profileId}`);
+  }
 }
 
-export async function saveMessageToFirestore(message: VillageMessage): Promise<void> {
+export async function saveMessageToFirestore(message: VillageMessage): Promise<boolean> {
   recordFirestoreWrite(1);
-  if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'messages', message.id);
-  await setDoc(docRef, message, { merge: true });
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'messages', message.id);
+    // Recursively strip undefined inside discussionThread items as well
+    const cleanPayload = stripUndefined({
+      ...message,
+      discussionThread: Array.isArray(message.discussionThread)
+        ? message.discussionThread.map((item) => stripUndefined(item as Record<string, any>))
+        : [],
+    });
+    await setDoc(docRef, cleanPayload, { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `messages/${message.id}`);
+    return false;
+  }
 }
 
-export async function deleteMessageFromFirestore(messageId: string): Promise<void> {
+export async function deleteMessageFromFirestore(messageId: string): Promise<boolean> {
   recordFirestoreWrite(1);
-  if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'messages', messageId);
-  await deleteDoc(docRef);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'messages', messageId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `messages/${messageId}`);
+    return false;
+  }
+}
+
+export async function saveNotificationToFirestore(
+  notif: PortalNotificationItem
+): Promise<boolean> {
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'notifications', notif.id);
+    await setDoc(docRef, stripUndefined(notif), { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `notifications/${notif.id}`);
+    return false;
+  }
+}
+
+export async function deleteNotificationFromFirestore(notifId: string): Promise<boolean> {
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'notifications', notifId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `notifications/${notifId}`);
+    return false;
+  }
+}
+
+export async function savePushSubscriptionToFirestore(
+  sub: PushSubscriptionDoc
+): Promise<boolean> {
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'pushSubscriptions', sub.id);
+    await setDoc(docRef, stripUndefined(sub), { merge: true });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `pushSubscriptions/${sub.id}`);
+    return false;
+  }
+}
+
+export async function deletePushSubscriptionFromFirestore(subId: string): Promise<boolean> {
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    const docRef = doc(db, 'pushSubscriptions', subId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `pushSubscriptions/${subId}`);
+    return false;
+  }
+}
+
+export async function saveUserNotificationPrefsToFirestore(
+  userKey: string,
+  prefs: UserNotificationSettings
+): Promise<boolean> {
+  if (!userKey) return false;
+  const safeDocId = userKey.replace(/[^a-zA-Z0-9_\-@.]/g, '_').slice(0, 120);
+  recordFirestoreWrite(1);
+  if (!isFirebaseConfigured()) return true;
+  try {
+    await setDoc(doc(db, 'userNotificationPrefs', safeDocId), stripUndefined(prefs), {
+      merge: true,
+    });
+    return true;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `userNotificationPrefs/${safeDocId}`);
+    return false;
+  }
+}
+
+export async function loadUserNotificationPrefsFromFirestore(
+  userKey: string
+): Promise<UserNotificationSettings | null> {
+  if (!userKey || !isFirebaseConfigured()) return null;
+  const safeDocId = userKey.replace(/[^a-zA-Z0-9_\-@.]/g, '_').slice(0, 120);
+  try {
+    recordFirestoreRead(1);
+    const snap = await getDoc(doc(db, 'userNotificationPrefs', safeDocId));
+    if (snap.exists()) {
+      return snap.data() as UserNotificationSettings;
+    }
+  } catch (err) {
+    console.warn('Could not load user notification prefs from Firestore:', err);
+  }
+  return null;
 }
 
 export const LOCAL_BANNER_BENEFITS_STRIP_KEY = 'rk_banner_benefits_strip_v1';
@@ -741,68 +1209,109 @@ export async function saveBannerBenefitsStripConfig(
     recordFirestoreWrite(1);
     await setDoc(doc(db, 'settings', 'bannerBenefitsStrip'), payload, { merge: true });
   } catch (e) {
-    console.warn('Error saving bannerBenefitsStrip to Firestore settings:', e);
+    handleFirestoreError(e, OperationType.WRITE, 'settings/bannerBenefitsStrip');
   }
 }
 
 export async function saveNewsEventToFirestore(news: VillageNewsEvent): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'newsEvents', news.id);
-  await setDoc(docRef, news, { merge: true });
+  try {
+    const { imageData, ...restNews } = news as any;
+    const docRef = doc(db, 'newsEvents', news.id);
+    await setDoc(docRef, stripUndefined(restNews), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `newsEvents/${news.id}`);
+  }
 }
 
 export async function deleteNewsEventFromFirestore(newsId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'newsEvents', newsId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'newsEvents', newsId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `newsEvents/${newsId}`);
+  }
 }
 
 export async function saveMosqueToFirestore(mosque: VillageMosque): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'mosques', mosque.id);
-  await setDoc(docRef, mosque, { merge: true });
+  try {
+    const docRef = doc(db, 'mosques', mosque.id);
+    await setDoc(docRef, stripUndefined(mosque), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `mosques/${mosque.id}`);
+  }
 }
 
 export async function deleteMosqueFromFirestore(mosqueId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'mosques', mosqueId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'mosques', mosqueId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `mosques/${mosqueId}`);
+  }
 }
 
 export async function saveInstituteToFirestore(institute: VillageInstitute): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'institutes', institute.id);
-  await setDoc(docRef, institute, { merge: true });
+  try {
+    const docRef = doc(db, 'institutes', institute.id);
+    await setDoc(docRef, stripUndefined(institute), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `institutes/${institute.id}`);
+  }
 }
 
 export async function deleteInstituteFromFirestore(instId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'institutes', instId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'institutes', instId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `institutes/${instId}`);
+  }
 }
 
 export async function saveTransportToFirestore(transport: VillageTransport): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'transports', transport.id);
-  await setDoc(docRef, transport, { merge: true });
+  try {
+    const docRef = doc(db, 'transports', transport.id);
+    await setDoc(docRef, stripUndefined(transport), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `transports/${transport.id}`);
+  }
 }
 
 export async function deleteTransportFromFirestore(transId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'transports', transId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'transports', transId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `transports/${transId}`);
+  }
 }
 
 export async function saveHospitalToFirestore(hospital: VillageHospital): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'hospitals', hospital.id);
-  await setDoc(docRef, hospital, { merge: true });
+  try {
+    const docRef = doc(db, 'hospitals', hospital.id);
+    await setDoc(docRef, stripUndefined(hospital), { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `hospitals/${hospital.id}`);
+  }
 }
 
 export async function deleteHospitalFromFirestore(hospId: string): Promise<void> {
   if (!isFirebaseConfigured()) return;
-  const docRef = doc(db, 'hospitals', hospId);
-  await deleteDoc(docRef);
+  try {
+    const docRef = doc(db, 'hospitals', hospId);
+    await deleteDoc(docRef);
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, `hospitals/${hospId}`);
+  }
 }
 
 // Student Progress & Stars Persistence

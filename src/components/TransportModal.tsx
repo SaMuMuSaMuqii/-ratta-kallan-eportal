@@ -144,22 +144,28 @@ export const TransportModal: React.FC<TransportModalProps> = ({
                 className="bg-stone-50 border border-stone-200 rounded-3xl overflow-hidden shadow-sm"
               >
                 {/* Vehicle Image & Header */}
-                <div className="relative h-36 bg-stone-900 overflow-hidden">
-                  <img
-                    src={veh.image}
-                    alt={veh.vehicleNumber}
-                    className="w-full h-full object-cover opacity-90"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/30 to-black/30" />
+                <div className="relative h-36 sm:h-40 bg-stone-900 overflow-hidden">
+                  {veh.image ? (
+                    <img
+                      src={veh.image}
+                      alt={veh.vehicleNumber}
+                      className="w-full h-full object-cover opacity-90"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-amber-300/30">
+                      <Bus className="w-12 h-12" />
+                    </div>
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/25" />
 
-                  <div className="absolute bottom-2.5 right-3 text-white">
+                  <div className="absolute bottom-2.5 right-3 left-3 text-white min-w-0">
                     <span className="px-2 py-0.5 rounded-lg text-[10px] font-mono font-bold bg-amber-400 text-stone-950 inline-block mb-1 shadow">
                       {veh.vehicleNumber}
                     </span>
-                    <h4 className="font-bold text-base font-nastaliq text-white leading-tight">
+                    <h4 className="font-bold text-base sm:text-lg font-nastaliq text-white leading-tight truncate">
                       {veh.title}
                     </h4>
-                    <p className="text-xs text-stone-300">
+                    <p className="text-xs text-stone-200 truncate">
                       ڈرائیور: {veh.driverName}
                     </p>
                   </div>
@@ -167,7 +173,7 @@ export const TransportModal: React.FC<TransportModalProps> = ({
                   {/* Audio button */}
                   <button
                     onClick={() => handleSpeakTransport(veh)}
-                    className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 ${
+                    className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer ${
                       activeAudioId === veh.id
                         ? 'bg-red-600 animate-voice-pulse'
                         : 'bg-black/50 hover:bg-black/70'

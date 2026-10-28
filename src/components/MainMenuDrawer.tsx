@@ -101,11 +101,11 @@ export const MainMenuDrawer: React.FC<MainMenuDrawerProps> = ({
               alt="رتہ کلاں جھنگ پورٹل لوگو"
               className="w-10 h-10 rounded-xl object-cover border border-amber-400 shadow-md shrink-0 bg-emerald-950"
             />
-            <div>
-              <h3 className="font-bold text-base font-nastaliq text-amber-200 leading-tight">
+            <div className="min-w-0 flex-1">
+              <h3 className="font-bold text-base font-nastaliq text-amber-200 leading-relaxed py-0.5">
                 رتہ کلاں جھنگ پورٹل
               </h3>
-              <span className="text-[10px] text-emerald-200 block">
+              <span className="text-[10px] text-emerald-200 block leading-relaxed">
                 مرکزی مینیو (Main Navigation)
               </span>
             </div>

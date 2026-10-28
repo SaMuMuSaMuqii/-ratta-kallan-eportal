@@ -463,10 +463,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
               <ShieldCheck className="w-6 h-6" />
             </div>
             <div>
-              <h2 className="text-lg font-bold tracking-tight text-white">
+              <h2 className="text-lg font-bold tracking-tight text-white font-sans leading-tight">
                 {mode === 'login' ? 'Sign In to Account' : 'Reset Password'}
               </h2>
-              <p className="text-xs text-emerald-200">
+              <p className="text-xs text-emerald-200 font-sans leading-tight mt-0.5">
                 {mode === 'login'
                   ? 'Ratta Kallan e-Portal Authentication'
                   : 'Account Password Recovery & Reset'}
@@ -560,10 +560,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {errorMsg && (
             <div
               role="alert"
-              className="p-3.5 bg-red-50 border border-red-300 rounded-2xl text-red-800 text-xs font-semibold flex items-start gap-2.5 animate-in fade-in"
+              className="p-3 bg-red-50 border border-red-300 rounded-2xl text-red-800 text-xs font-semibold flex items-start gap-2 animate-in fade-in"
             >
               <AlertTriangle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{errorMsg}</span>
+              <span className="leading-snug">{errorMsg}</span>
             </div>
           )}
 
@@ -571,17 +571,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {successMsg && (
             <div
               role="status"
-              className="p-3.5 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 text-xs font-semibold flex items-start gap-2.5 animate-in fade-in"
+              className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 text-xs font-semibold flex items-start gap-2 animate-in fade-in"
             >
               <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
-              <span className="leading-relaxed">{successMsg}</span>
+              <span className="leading-snug">{successMsg}</span>
             </div>
           )}
 
           {/* MODE 1: SIGN IN */}
           {mode === 'login' && (
-            <form onSubmit={handleLoginSubmit} className="space-y-4" noValidate>
-              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-3 text-xs text-emerald-950 leading-relaxed">
+            <form onSubmit={handleLoginSubmit} className="space-y-3.5" noValidate>
+              <div className="bg-emerald-50/80 border border-emerald-200 rounded-2xl p-2.5 text-xs text-emerald-950 font-sans leading-snug">
                 Sign in with your <strong>Username</strong> and <strong>Password</strong> to
                 manage your profile or access administrator controls.
               </div>
@@ -672,8 +672,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           {mode === 'reset' && (
             <div className="space-y-4">
               {resetStep === 'send_link' ? (
-                <form onSubmit={handleSendResetLink} className="space-y-4" noValidate>
-                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 leading-relaxed">
+                <form onSubmit={handleSendResetLink} className="space-y-3.5" noValidate>
+                  <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-xs text-amber-950 font-sans leading-snug">
                     Enter your <strong>Username</strong> and registered{' '}
                     <strong>Email Address</strong> to verify your account and receive a password
                     reset link.
@@ -682,7 +682,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div>
                     <label
                       htmlFor="auth-reset-username"
-                      className="block text-xs font-bold text-stone-800 mb-1.5"
+                      className="block text-xs font-bold text-stone-800 mb-1"
                     >
                       Username
                     </label>
@@ -704,7 +704,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   <div>
                     <label
                       htmlFor="auth-reset-email"
-                      className="block text-xs font-bold text-stone-800 mb-1.5"
+                      className="block text-xs font-bold text-stone-800 mb-1"
                     >
                       Email Address
                     </label>
@@ -721,7 +721,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                       />
                       <Mail className="w-4 h-4 text-stone-400 absolute left-3.5 top-3" />
                     </div>
-                    <p className="text-[11px] text-stone-500 mt-1">
+                    <p className="text-[11px] text-stone-500 leading-tight mt-1">
                       Note: Password reset is only permitted using the Email Address registered
                       to your account.
                     </p>
@@ -746,8 +746,8 @@ export const AuthModal: React.FC<AuthModalProps> = ({
                   </button>
                 </form>
               ) : (
-                <form onSubmit={handleResetPasswordSubmit} className="space-y-4" noValidate>
-                  <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3 text-xs text-emerald-950 leading-relaxed">
+                <form onSubmit={handleResetPasswordSubmit} className="space-y-3.5" noValidate>
+                  <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-2.5 text-xs text-emerald-950 font-sans leading-snug">
                     Account verified for <strong>{resetUsername}</strong> ({resetEmail}). Enter
                     and confirm your new password below.
                   </div>

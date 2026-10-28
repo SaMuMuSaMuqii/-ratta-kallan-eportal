@@ -180,7 +180,10 @@ export interface ChatDiscussionItem {
   attachmentUrl?: string;
   attachmentType?: 'image' | 'video' | 'file';
   timestamp: string;
+  isRead?: boolean;
 }
+
+export type MessageDeliveryStatus = 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
 
 export interface VillageMessage {
   id: string;
@@ -200,7 +203,14 @@ export interface VillageMessage {
   attachmentType?: 'image' | 'video' | 'file';
   inquiryType: 'charges' | 'availability' | 'urgent_work' | 'general';
   createdAt: string;
+  updatedAt?: string;
   isRead: boolean;
+  readAt?: string;
+  unreadByRecipient?: boolean; // True when recipient has unread initial message or sender reply
+  unreadBySender?: boolean; // True when sender has unread reply from recipient
+  deliveryStatus?: MessageDeliveryStatus;
+  lastMessagePreview?: string;
+  lastSenderRole?: 'sender' | 'receiver' | 'admin';
   isReported?: boolean; // Admin can read a private message ONLY when it was reported
   reportedAt?: string;
   reportedBy?: string;
@@ -212,6 +222,56 @@ export interface VillageMessage {
   deletedByRecipient?: boolean;
   deletedAt?: string;
   deletedByRole?: string;
+}
+
+export type PortalNotificationType =
+  | 'new_message'
+  | 'message_reply'
+  | 'announcement'
+  | 'profile_update'
+  | 'emergency_alert'
+  | 'system';
+
+export interface PortalNotificationItem {
+  id: string;
+  recipientProfileId?: string;
+  recipientMobile?: string;
+  recipientUid?: string;
+  isGlobal?: boolean;
+  type: PortalNotificationType;
+  title: string;
+  body: string;
+  senderName?: string;
+  senderMobile?: string;
+  relatedMessageId?: string;
+  relatedProfileId?: string;
+  createdAt: string;
+  isRead: boolean;
+  readAt?: string;
+  readByKeys?: string[]; // For global notifications, tracks which user keys have read it
+  clearedByKeys?: string[]; // Tracks which user keys have cleared it
+}
+
+export interface UserNotificationSettings {
+  inAppEnabled: boolean;
+  soundEnabled: boolean;
+  pushEnabled: boolean;
+  messageAlerts: boolean;
+  announcementAlerts: boolean;
+  updatedAt: string;
+}
+
+export interface PushSubscriptionDoc {
+  id: string;
+  userKey: string;
+  uid?: string;
+  profileId?: string;
+  mobile?: string;
+  fcmToken?: string;
+  endpoint?: string;
+  userAgent?: string;
+  enabled: boolean;
+  updatedAt: string;
 }
 
 export interface DeletedMessageArchiveItem {
@@ -251,8 +311,20 @@ export interface VillageNewsEvent {
   time?: string;
   location: string;
   imageUrl?: string;
+  mobileImageUrl?: string;
   hasBannerImage?: boolean; // True when a compressed <80KB image doc exists in bannerImages/{id}
+  hasMobileBannerImage?: boolean; // True when a separate mobile banner image exists in bannerImages/{id}_mobile
   skipBannerImage?: boolean; // True when admin chose "بغیر تصویر (Skip)" — shows Urdu text on coloured background
+  imageFit?: 'cover' | 'contain'; // 'cover' fills banner area using focal point; 'contain' shows full image without cropping
+  aspectRatio?: '16:9' | '21:9' | '4:3' | 'auto';
+  focalX?: number; // 0-100 horizontal focal point percentage (default 50)
+  focalY?: number; // 0-100 vertical focal point percentage (default 50)
+  mobileFocalX?: number; // 0-100 mobile horizontal focal point percentage (default 50)
+  mobileFocalY?: number; // 0-100 mobile vertical focal point percentage (default 50)
+  zoom?: number; // 1.0 - 2.0 scale factor (default 1.0)
+  whatsappNumber?: string; // Custom WhatsApp number for this slide (defaults to 923270019099)
+  whatsappMessage?: string; // Custom pre-filled WhatsApp message for this slide
+  whatsappLabel?: string; // Custom WhatsApp button label (defaults to واٹس ایپ رابطہ)
   isPopupOnLaunch: boolean;
   isHidden?: boolean;
   isApproved?: boolean;
@@ -267,6 +339,12 @@ export interface BannerSlideImageDoc {
   width: number;
   height: number;
   byteSize: number;
+  imageFit?: 'cover' | 'contain';
+  aspectRatio?: '16:9' | '21:9' | '4:3' | 'auto';
+  focalX?: number;
+  focalY?: number;
+  zoom?: number;
+  isMobileVariant?: boolean;
   updatedAt: string;
 }
 

@@ -1,38 +1,76 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 360" width="800" height="360">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" width="800" height="400" preserveAspectRatio="xMidYMid slice">
   <defs>
     <linearGradient id="bg1" x1="0%" y1="0%" x2="100%" y2="100%">
       <stop offset="0%" stop-color="#022c22" />
-      <stop offset="50%" stop-color="#065f46" />
+      <stop offset="50%" stop-color="#064e3b" />
       <stop offset="100%" stop-color="#0f766e" />
     </linearGradient>
-    <linearGradient id="gold1" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" stop-color="#f59e0b" />
-      <stop offset="100%" stop-color="#fde047" />
+    <linearGradient id="goldGrad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fbbf24" />
+      <stop offset="100%" stop-color="#f59e0b" />
     </linearGradient>
+    <radialGradient id="glow1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#34d399" stop-opacity="0.28" />
+      <stop offset="100%" stop-color="#022c22" stop-opacity="0" />
+    </radialGradient>
   </defs>
-  <rect width="800" height="360" rx="24" fill="url(#bg1)" />
-  <circle cx="95" cy="95" r="145" fill="#10b981" opacity="0.14" />
-  <circle cx="710" cy="285" r="165" fill="#fbbf24" opacity="0.12" />
-  <rect x="18" y="18" width="764" height="324" rx="20" fill="none" stroke="url(#gold1)" stroke-width="3" opacity="0.85" />
 
-  <!-- Top Header Pill -->
-  <rect x="210" y="28" width="380" height="38" rx="19" fill="#064e3b" stroke="#fbbf24" stroke-width="1.5" />
-  <text x="400" y="53" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="18" font-weight="bold" fill="#fde047" text-anchor="middle">
-    🌟 رتہ کلاں جھنگ پورٹل — فائدہ اور استعمال (سلائیڈ 1)
-  </text>
+  <!-- Background -->
+  <rect width="800" height="400" fill="url(#bg1)" />
+  <circle cx="400" cy="200" r="240" fill="url(#glow1)" />
 
-  <!-- Main Pair 1 Card -->
-  <rect x="44" y="84" width="712" height="172" rx="20" fill="#042f2e" stroke="#34d399" stroke-width="2" opacity="0.95" />
-  <text x="728" y="140" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="23" font-weight="bold" fill="#fef08a" text-anchor="end">
-    استعمال: گاؤں کے مستری، مزدور، دکاندار اور ڈاکٹر ایک جگہ تلاش کریں۔
-  </text>
-  <text x="728" y="208" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="23" font-weight="bold" fill="#a7f3d0" text-anchor="end">
-    فائدہ: روزگار اور کام گھر بیٹھے ملتا ہے۔
-  </text>
+  <!-- Decorative Subtle Village Archway & Fields Silhouette -->
+  <path d="M0 330 Q200 290 400 325 T800 320 L800 400 L0 400 Z" fill="#022c22" opacity="0.65" />
+  <path d="M0 355 Q260 325 520 350 T800 345 L800 400 L0 400 Z" fill="#042f2e" opacity="0.85" />
 
-  <!-- Bottom Feature Badges -->
-  <rect x="44" y="274" width="712" height="48" rx="14" fill="#fbbf24" />
-  <text x="400" y="305" font-family="'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', Tahoma, sans-serif" font-size="17" font-weight="bold" fill="#022c22" text-anchor="middle">
-    🔨 مستری و مزدور  •  🩺 ڈاکٹر و ہسپتال  •  🛒 دکاندار  •  🚜 زرعی ٹریکٹر
-  </text>
+  <!-- Inner Frame within Safe Area -->
+  <rect x="28" y="24" width="744" height="352" rx="24" fill="none" stroke="#fbbf24" stroke-width="2" stroke-opacity="0.45" />
+
+  <!-- Center Focal Emblem: Village Directory & Skilled Workers Hub -->
+  <g transform="translate(400, 175)">
+    <!-- Outer Halo -->
+    <circle cx="0" cy="0" r="88" fill="#065f46" stroke="url(#goldGrad1)" stroke-width="3" />
+    <circle cx="0" cy="0" r="72" fill="#022c22" stroke="#34d399" stroke-width="1.5" stroke-dasharray="6 4" />
+
+    <!-- Central Village Mosque & Sun Emblem -->
+    <circle cx="0" cy="-22" r="22" fill="url(#goldGrad1)" opacity="0.9" />
+    <!-- Dome & Minarets -->
+    <path d="M-36 22 C-36 -8 36 -8 36 22 Z" fill="#10b981" />
+    <rect x="-48" y="-18" width="8" height="40" rx="3" fill="#fde047" />
+    <rect x="40" y="-18" width="8" height="40" rx="3" fill="#fde047" />
+    <rect x="-52" y="22" width="104" height="10" rx="5" fill="#fbbf24" />
+  </g>
+
+  <!-- Left Safe-Zone Icon Card (Skilled Workers & Tractors) -->
+  <g transform="translate(175, 175)">
+    <rect x="-56" y="-56" width="112" height="112" rx="24" fill="#022c22" fill-opacity="0.85" stroke="#fbbf24" stroke-width="2" />
+    <circle cx="0" cy="-10" r="26" fill="#f59e0b" fill-opacity="0.2" />
+    <!-- Wrench & Gear Vector -->
+    <path d="M-14 -22 L14 6 M-14 6 L14 -22" stroke="#fde047" stroke-width="5" stroke-linecap="round" />
+    <circle cx="0" cy="-8" r="9" fill="#022c22" stroke="#34d399" stroke-width="3" />
+    <rect x="-36" y="24" width="72" height="16" rx="8" fill="#065f46" />
+    <circle cx="-18" cy="32" r="3" fill="#fde047" />
+    <circle cx="0" cy="32" r="3" fill="#fde047" />
+    <circle cx="18" cy="32" r="3" fill="#fde047" />
+  </g>
+
+  <!-- Right Safe-Zone Icon Card (Medical & Shops) -->
+  <g transform="translate(625, 175)">
+    <rect x="-56" y="-56" width="112" height="112" rx="24" fill="#022c22" fill-opacity="0.85" stroke="#34d399" stroke-width="2" />
+    <circle cx="0" cy="-10" r="26" fill="#10b981" fill-opacity="0.2" />
+    <!-- Medical Cross Vector -->
+    <rect x="-6" y="-26" width="12" height="32" rx="3" fill="#34d399" />
+    <rect x="-16" y="-16" width="32" height="12" rx="3" fill="#34d399" />
+    <rect x="-36" y="24" width="72" height="16" rx="8" fill="#065f46" />
+    <circle cx="-18" cy="32" r="3" fill="#6ee7b7" />
+    <circle cx="0" cy="32" r="3" fill="#6ee7b7" />
+    <circle cx="18" cy="32" r="3" fill="#6ee7b7" />
+  </g>
+
+  <!-- Connecting Gold Lines -->
+  <line x1="231" y1="175" x2="312" y2="175" stroke="#fbbf24" stroke-width="2.5" stroke-dasharray="6 6" />
+  <line x1="488" y1="175" x2="569" y2="175" stroke="#34d399" stroke-width="2.5" stroke-dasharray="6 6" />
+
+  <!-- Bottom Decorative Gold Bar inside Safe Zone -->
+  <rect x="240" y="310" width="320" height="8" rx="4" fill="url(#goldGrad1)" opacity="0.85" />
 </svg>

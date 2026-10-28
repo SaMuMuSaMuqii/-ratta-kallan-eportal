@@ -1,14 +1,64 @@
 @import "tailwindcss";
 
-/* Jameel Noori Nastaleeq Regular for Arabic & Urdu characters with reliable fallbacks */
+/* Force all English / Latin characters, numbers, punctuation & ASCII spaces (U+0020)
+   to render in clean standard Arial / Arimo / sans-serif with compact metrics
+   so Urdu Nastaliq font or wide Nastaliq word/line spacing NEVER applies to English text */
+@font-face {
+  font-family: 'PortalLatinSans';
+  src:
+    local('Arial'),
+    local('ArialMT'),
+    local('Arimo'),
+    local('Arimo Regular'),
+    local('Helvetica Neue'),
+    local('Helvetica'),
+    local('Segoe UI'),
+    local('Roboto'),
+    local('Roboto Regular'),
+    local('Noto Sans'),
+    local('Liberation Sans'),
+    local('DejaVu Sans');
+  font-weight: 100 500;
+  font-style: normal;
+  ascent-override: 90%;
+  descent-override: 20%;
+  line-gap-override: 0%;
+  unicode-range: U+0000-00FF, U+0100-024F, U+2000-206F, U+20A0-20CF;
+}
+
+@font-face {
+  font-family: 'PortalLatinSans';
+  src:
+    local('Arial Bold'),
+    local('Arial-BoldMT'),
+    local('Arimo Bold'),
+    local('Helvetica Neue Bold'),
+    local('Helvetica Bold'),
+    local('Segoe UI Bold'),
+    local('Segoe UI Semibold'),
+    local('Roboto Bold'),
+    local('Roboto Medium'),
+    local('Noto Sans Bold'),
+    local('Liberation Sans Bold'),
+    local('DejaVu Sans Bold'),
+    local('Arial'),
+    local('Arimo'),
+    local('Roboto');
+  font-weight: 600 900;
+  font-style: normal;
+  ascent-override: 90%;
+  descent-override: 20%;
+  line-gap-override: 0%;
+  unicode-range: U+0000-00FF, U+0100-024F, U+2000-206F, U+20A0-20CF;
+}
+
+/* Jameel Noori Nastaleeq Regular strictly for Arabic & Urdu characters only (never Latin or U+0020 space) */
 @font-face {
   font-family: 'Jameel Noori Nastaleeq';
   src:
     local('Jameel Noori Nastaleeq'),
     local('Jameel Noori Nastaleeq Regular'),
-    local('JameelNooriNastaleeq'),
-    url('/fonts/JameelNooriNastaleeqRegular.woff2') format('woff2'),
-    url('/fonts/JameelNooriNastaleeqRegular.ttf') format('truetype');
+    local('JameelNooriNastaleeq');
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -17,9 +67,11 @@
 
 @layer base {
   :root {
-    --font-latin: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    --font-urdu: 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', Tahoma, 'Outfit', system-ui, sans-serif;
-    --font-sans: var(--font-latin), var(--font-urdu);
+    --font-latin: Arial, 'Arimo', 'Helvetica Neue', Helvetica, 'Segoe UI', Roboto, system-ui, -apple-system, sans-serif;
+    /* PortalLatinSans, Arimo, and Outfit come BEFORE Nastaliq so English words and spaces (U+0020)
+       ALWAYS use compact standard Arial/sans-serif and NEVER reach Noto Nastaliq Urdu */
+    --font-urdu: 'PortalLatinSans', 'Arimo', 'Outfit', 'Jameel Noori Nastaleeq', 'Noto Nastaliq Urdu', 'Urdu Typesetting', Tahoma, Arial, sans-serif;
+    --font-sans: var(--font-latin);
   }
 
   *,
@@ -38,7 +90,8 @@
 
   body {
     font-family: var(--font-urdu);
-    line-height: 1.85;
+    line-height: 1.6;
+    word-spacing: -0.02em;
     max-width: 100%;
     overflow-x: hidden;
     word-wrap: break-word;
@@ -53,8 +106,9 @@
   h4,
   h5,
   h6 {
-    font-family: var(--font-urdu);
-    line-height: 1.65;
+    font-family: inherit;
+    line-height: 1.5;
+    word-spacing: -0.02em;
   }
 
   button,
@@ -71,7 +125,8 @@
   dialog,
   [role="dialog"] {
     font-family: inherit;
-    line-height: 1.65;
+    line-height: 1.5;
+    word-spacing: -0.02em;
   }
 
   p,
@@ -79,13 +134,16 @@
   dd,
   dt,
   blockquote {
-    line-height: 1.85;
+    line-height: 1.6;
+    word-spacing: -0.02em;
   }
 
   [dir="ltr"],
   [lang="en"] {
-    font-family: var(--font-latin), var(--font-urdu);
-    line-height: 1.5;
+    font-family: var(--font-latin);
+    line-height: 1.3;
+    word-spacing: -0.03em;
+    letter-spacing: -0.005em;
     direction: ltr;
     unicode-bidi: isolate;
   }
@@ -105,44 +163,178 @@
   }
 }
 
-/* Hide scrollbar for horizontal scroll tabs while keeping scrollability */
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-.no-scrollbar {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
+/* ============================================================================
+   ENGLISH / LATIN TYPOGRAPHY (Standard Arial / Sans-Serif & Compact Word/Line Spacing)
+   ============================================================================ */
+
+.font-sans,
+[dir="ltr"],
+[lang="en"] {
+  font-family: var(--font-latin) !important;
+  line-height: 1.3 !important;
+  word-spacing: -0.03em !important;
+  letter-spacing: -0.005em;
 }
 
-/* Urdu & Punjabi Nastaliq Typography (no forced !important) */
-.font-nastaliq,
-.font-urdu-clean {
+/* Ensure all headings, subheadings, paragraphs, and controls inside English / LTR / font-sans
+   use standard Arial/sans-serif and tight, clean line-height & word-spacing */
+:is(.font-sans, [dir="ltr"], [lang="en"]) :is(h1, h2, h3, h4, h5, h6):not([dir="rtl"]):not([lang="ur"]),
+:is(h1, h2, h3, h4, h5, h6):is(.font-sans, [dir="ltr"], [lang="en"]) {
+  font-family: var(--font-latin) !important;
+  line-height: 1.18 !important;
+  word-spacing: -0.03em !important;
+  letter-spacing: -0.01em;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+:is(.font-sans, [dir="ltr"], [lang="en"]) :is(p, span, div, li, label, button, a, input, select, textarea, strong, small):not([dir="rtl"]):not([lang="ur"]),
+:is(p, span, div, li, label, button, a, input, select, textarea, strong, small):is(.font-sans, [dir="ltr"], [lang="en"]) {
+  font-family: var(--font-latin) !important;
+  line-height: 1.3 !important;
+  word-spacing: -0.03em !important;
+}
+
+/* ============================================================================
+   URDU NASTALIQ TYPOGRAPHY (Scoped strictly to Urdu / RTL elements)
+   ============================================================================ */
+
+:is(.font-nastaliq, .font-urdu, .font-urdu-clean):not([dir="ltr"]):not([lang="en"]):not(.font-sans) {
   font-family: var(--font-urdu);
-  line-height: 1.85;
-}
-
-h1.font-nastaliq,
-h2.font-nastaliq,
-h3.font-nastaliq,
-h4.font-nastaliq,
-button.font-nastaliq,
-a.font-nastaliq {
   line-height: 1.65;
+  word-spacing: -0.02em;
 }
 
-/* English / Latin & Numeric Typography */
-.font-sans {
-  font-family: var(--font-latin), var(--font-urdu);
-  line-height: 1.5;
+:is(
+  h1.font-nastaliq,
+  h2.font-nastaliq,
+  h3.font-nastaliq,
+  h4.font-nastaliq,
+  h1.font-urdu,
+  h2.font-urdu,
+  h3.font-urdu,
+  h4.font-urdu,
+  button.font-nastaliq,
+  button.font-urdu,
+  a.font-nastaliq,
+  a.font-urdu
+):not([dir="ltr"]):not([lang="en"]):not(.font-sans) {
+  line-height: 1.55;
+  word-spacing: -0.02em;
+}
+
+/* Prevent Tailwind text-* and leading-* utilities from squishing Urdu Nastaliq vertical strokes,
+   while strictly excluding any English / LTR / font-sans / font-mono elements and their children */
+[dir="rtl"]:not([lang="en"]) :is(
+  .text-xs,
+  .text-sm,
+  .text-base,
+  .text-lg,
+  .text-xl,
+  .text-2xl,
+  .text-3xl,
+  .leading-tight,
+  .leading-snug,
+  .leading-relaxed,
+  .leading-loose
+):not(
+  [dir="ltr"],
+  [dir="ltr"] *,
+  [lang="en"],
+  [lang="en"] *,
+  .font-sans,
+  .font-sans *,
+  .font-mono,
+  .font-mono *
+) {
+  line-height: 1.65;
+  word-spacing: -0.02em;
+}
+
+/* Protect Urdu ascenders and descender bowls inside .truncate and .line-clamp-* in RTL Urdu only */
+[dir="rtl"]:not([lang="en"]) :is(.truncate, .line-clamp-1, .line-clamp-2, .line-clamp-3):not(
+  [dir="ltr"],
+  [dir="ltr"] *,
+  [lang="en"],
+  [lang="en"] *,
+  .font-sans,
+  .font-sans *,
+  .font-mono,
+  .font-mono *
+) {
+  line-height: 1.65;
+  padding-top: 0.08em;
+  padding-bottom: 0.12em;
+}
+
+/* Form inputs & buttons default vertical centering */
+input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]):not([type="file"]),
+select,
+textarea {
+  min-height: 2.5rem;
+  padding-top: 0.35rem;
+  padding-bottom: 0.35rem;
+}
+
+/* Quick Search & Tag Containers: always wrap cleanly with 8px gap so buttons never overlap */
+.quick-search-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.quick-search-container > button,
+.quick-search-container > a,
+.quick-search-container > span {
+  flex-shrink: 0;
+}
+
+/* Safe Grid shrinking behavior & prevent buttons with nowrap text from collapsing below content width */
+.grid > * {
+  min-width: 0;
+}
+
+button.whitespace-nowrap,
+a.whitespace-nowrap {
+  flex-shrink: 0;
 }
 
 /* Bi-directional isolation for numbers, phone numbers, emails, and URLs inside RTL containers */
 input[type="tel"],
 input[type="email"],
 input[type="url"],
-.ltr-inline {
+.ltr-inline,
+.font-mono {
   direction: ltr;
   unicode-bidi: isolate;
+  font-family: var(--font-latin);
+  line-height: 1.3;
+  word-spacing: -0.03em;
+}
+
+/* Hide scrollbar for horizontal scroll tabs while keeping scrollability */
+.no-scrollbar::-webkit-scrollbar,
+.scrollbar-none::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar,
+.scrollbar-none {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+/* Safe area padding for mobile bottom navigation */
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Prevent media elements from overflowing narrow mobile viewports (320px+) */
+img,
+video,
+canvas,
+svg {
+  max-width: 100%;
 }
 
 /* Pulse animation for active voice recording */
@@ -155,4 +347,3 @@ input[type="url"],
 .animate-voice-pulse {
   animation: voice-pulse 1.4s infinite cubic-bezier(0.4, 0, 0.6, 1);
 }
-

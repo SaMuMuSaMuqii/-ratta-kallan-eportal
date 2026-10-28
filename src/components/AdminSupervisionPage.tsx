@@ -61,6 +61,7 @@ import {
   saveBannerBenefitsStripConfig,
   DEFAULT_BANNER_BENEFIT_PAIRS,
 } from '../firebase/firestoreService';
+import { BannerSlideStudioModal } from './BannerSlideStudioModal';
 import {
   verifyRoleAndOwnershipPermission,
   isAuthorizedSuperAdminResetEmail,
@@ -218,6 +219,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
   const [activeMainTab, setActiveMainTab] = useState<
     'overview' | 'content' | 'reports' | 'roles' | 'logs'
   >('overview');
+  const [studioModalOpen, setStudioModalOpen] = useState<boolean>(false);
+  const [studioSelectedSlideId, setStudioSelectedSlideId] = useState<string | undefined>(undefined);
 
   // Sub-tabs inside Content Control
   const [contentSection, setContentSection] = useState<
@@ -743,10 +746,10 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             <div className="flex items-center gap-2.5 text-amber-300">
               <KeyRound className="w-6 h-6 shrink-0" />
               <div>
-                <h3 className="text-base sm:text-lg font-bold">
+                <h3 className="text-base sm:text-lg font-bold font-sans leading-tight tracking-tight">
                   Reset Password
                 </h3>
-                <p className="text-[11px] text-stone-300">
+                <p className="text-[11px] text-stone-300 font-sans leading-tight mt-0.5">
                   Admin Account Password Recovery & Update
                 </p>
               </div>
@@ -792,11 +795,11 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             </button>
           </div>
 
-          <div className="p-5 space-y-4">
+          <div className="p-5 space-y-3.5">
             {pwdStatusMessage && (
               <div
                 role="alert"
-                className={`p-3.5 rounded-2xl text-xs leading-relaxed border ${
+                className={`p-3 rounded-2xl text-xs leading-snug border ${
                   pwdStatusMessage.type === 'success'
                     ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200'
                     : 'bg-red-950/90 border-red-500 text-red-200'
@@ -886,7 +889,7 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
               </form>
             ) : (
               <form onSubmit={handleSendAdminResetEmail} className="space-y-3" noValidate>
-                <p className="text-xs text-stone-300 leading-relaxed">
+                <p className="text-xs text-stone-300 font-sans leading-snug">
                   Enter your authorized Admin <strong>Email Address</strong> to receive a
                   password reset link, or specify a <strong>New Password</strong> below.
                 </p>
@@ -958,11 +961,11 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
           </div>
           <h1
             data-testid="admin-permission-denied"
-            className="text-2xl font-bold text-red-200 leading-snug"
+            className="text-2xl font-bold text-red-200 font-sans leading-tight tracking-tight"
           >
             Access Denied
           </h1>
-          <p className="text-sm text-red-100/90 leading-relaxed">
+          <p className="text-sm text-red-100/90 font-sans leading-snug">
             You do not have permission to access this page. This supervision console is restricted to authorized administrators only.
           </p>
           <div className="flex flex-col sm:flex-row gap-3 pt-2">
@@ -1003,8 +1006,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                 <ShieldCheck className="w-7 h-7" />
               </div>
               <div>
-                <h1 className="text-xl font-bold text-amber-300">Admin Sign In & Password Reset</h1>
-                <p className="text-xs text-stone-300">Ratta Kallan e-Portal — Supervision Console</p>
+                <h1 className="text-xl font-bold text-amber-300 font-sans leading-tight tracking-tight">Admin Sign In & Password Reset</h1>
+                <p className="text-xs text-stone-300 font-sans leading-tight mt-0.5">Ratta Kallan e-Portal — Supervision Console</p>
               </div>
             </div>
             <button
@@ -1017,8 +1020,8 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
             </button>
           </div>
 
-          <form onSubmit={handleAdminSignIn} className="p-5 sm:p-6 space-y-4" noValidate>
-            <div className="bg-stone-950/90 border border-stone-700 rounded-2xl p-3.5 text-xs text-stone-300 leading-relaxed">
+          <form onSubmit={handleAdminSignIn} className="p-5 sm:p-6 space-y-3.5" noValidate>
+            <div className="bg-stone-950/90 border border-stone-700 rounded-2xl p-3 text-xs text-stone-300 font-sans leading-snug">
               Sign in with your authorized Admin <strong className="text-amber-300">Email Address</strong> and <strong className="text-amber-300">Password</strong> to access the portal supervision console.
             </div>
 
@@ -1905,22 +1908,85 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
                   </button>
                 </div>
 
-                {newsEvents.map((ev) => (
+                {/* Prominent Main 3 Banner Slides Studio Launcher */}
+                <div className="bg-gradient-to-l from-emerald-950 via-stone-900 to-emerald-950 border-2 border-amber-400 rounded-2xl p-4 space-y-3 shadow-lg">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="space-y-1">
+                      <h4 className="text-base font-bold text-amber-300">
+                        🎨 مین بینر کی ۳ سلائیڈز کا مکمل اسٹوڈیو (تصویر کروپ، فوکل پوائنٹ، ڈیسک ٹاپ/موبائل تصویر، ٹیکسٹ اور واٹس ایپ)
+                      </h4>
+                      <p className="text-xs text-stone-300">
+                        ہر سلائیڈ کی ڈیسک ٹاپ و موبائل تصویر، فوکل پوائنٹ، سرخی، تفصیل اور واٹس ایپ بٹن کو الگ الگ منظم کریں اور لائیو پری ویو دیکھیں۔
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStudioSelectedSlideId(newsEvents[0]?.id);
+                        setStudioModalOpen(true);
+                      }}
+                      className="min-h-[44px] px-4 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs font-bold cursor-pointer shadow"
+                    >
+                      ✨ بینر سلائیڈز اسٹوڈیو کھولیں
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    {newsEvents.slice(0, 3).map((slide, idx) => (
+                      <button
+                        key={slide.id}
+                        type="button"
+                        onClick={() => {
+                          setStudioSelectedSlideId(slide.id);
+                          setStudioModalOpen(true);
+                        }}
+                        className="p-2.5 rounded-xl bg-stone-950/80 hover:bg-stone-900 border border-stone-700 text-right flex items-center justify-between gap-2 cursor-pointer"
+                      >
+                        <div className="min-w-0">
+                          <span className="text-[11px] font-bold text-amber-300 block">
+                            سلائیڈ نمبر {idx + 1} ایڈٹ کریں
+                          </span>
+                          <span className="text-xs text-white truncate block">{slide.title}</span>
+                        </div>
+                        <Edit className="w-4 h-4 text-emerald-400 shrink-0" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {newsEvents.map((ev, idx) => (
                   <div
                     key={ev.id}
                     className="p-4 bg-stone-900 border border-stone-800 rounded-2xl flex flex-wrap items-center justify-between gap-3"
                   >
                     <div className="space-y-1">
-                      <strong className="text-base text-white block">{ev.title}</strong>
-                      <p className="text-xs text-stone-400">{ev.content}</p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="bg-emerald-900 text-amber-300 text-[11px] px-2.5 py-0.5 rounded-lg font-bold">
+                          سلائیڈ {idx + 1}
+                        </span>
+                        <strong className="text-base text-white">{ev.title}</strong>
+                      </div>
+                      <p className="text-xs text-stone-400 line-clamp-2">{ev.content}</p>
                       <span className="text-[11px] text-amber-300 block">
                         بینر حالت:{' '}
-                        {ev.hasBannerImage && !ev.skipBannerImage
-                          ? 'تصویر لگی ہے'
+                        {!ev.skipBannerImage && (ev.hasBannerImage || ev.imageUrl)
+                          ? `تصویر فعال (${ev.imageFit === 'contain' ? 'مکمل تصویر' : 'فِٹ کور'})`
                           : 'بغیر تصویر (رنگین پس منظر)'}
                       </span>
                     </div>
                     <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStudioSelectedSlideId(ev.id);
+                          setStudioModalOpen(true);
+                        }}
+                        className="min-h-[42px] px-3.5 py-2 bg-amber-400 hover:bg-amber-300 text-stone-950 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer shadow"
+                      >
+                        <Edit className="w-4 h-4" />
+                        <span>کروپ، پوزیشن و ٹیکسٹ ایڈٹ</span>
+                      </button>
+
                       <label className="min-h-[42px] px-3 py-2 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer">
                         <ImageIcon className="w-4 h-4" />
                         <span>تصویر لگائیں</span>
@@ -2809,6 +2875,18 @@ export const AdminSupervisionPage: React.FC<AdminSupervisionPageProps> = ({
         </div>
       )}
       {renderAdminPasswordModal()}
+      <BannerSlideStudioModal
+        isOpen={studioModalOpen}
+        onClose={() => setStudioModalOpen(false)}
+        events={newsEvents}
+        initialSelectedId={studioSelectedSlideId}
+        onSaveSlide={(updatedEv) => {
+          onSaveNewsEvent(updatedEv);
+          onBannerImagesChanged();
+          setBannerNotice(`سلائیڈ "${updatedEv.title}" کامیابی سے اپڈیٹ ہو گئی۔`);
+        }}
+        onBannerImagesChanged={onBannerImagesChanged}
+      />
     </div>
   );
 };

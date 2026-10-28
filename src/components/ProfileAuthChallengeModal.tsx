@@ -125,12 +125,12 @@ export const ProfileAuthChallengeModal: React.FC<ProfileAuthChallengeModalProps>
               )}
             </div>
             <div>
-              <h3 className="text-base font-bold">
+              <h3 className="text-base font-bold font-sans leading-tight tracking-tight">
                 {actionType === 'delete'
                   ? 'Authentication Required to Delete'
                   : 'Authentication Required to Edit'}
               </h3>
-              <p className="text-xs text-amber-200">
+              <p className="text-xs text-amber-200 font-sans leading-tight mt-0.5">
                 Account Verification for {profile.name}
               </p>
             </div>
@@ -161,8 +161,8 @@ export const ProfileAuthChallengeModal: React.FC<ProfileAuthChallengeModalProps>
           </div>
 
           {!isConfirmStep ? (
-            <form onSubmit={handleVerifyPassword} className="space-y-4" noValidate>
-              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 leading-relaxed flex items-start gap-2">
+            <form onSubmit={handleVerifyPassword} className="space-y-3.5" noValidate>
+              <div className="bg-amber-50 border border-amber-200 rounded-2xl p-2.5 text-xs text-amber-950 font-sans leading-snug flex items-start gap-2">
                 <ShieldCheck className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                 <span>
                   This account is password-protected. Please enter your{' '}
@@ -289,12 +289,12 @@ export const ProfileAuthChallengeModal: React.FC<ProfileAuthChallengeModalProps>
               </div>
 
               <div className="space-y-1">
-                <h4 className="font-bold text-base text-stone-900">
+                <h4 className="font-bold text-base text-stone-900 font-sans leading-tight tracking-tight">
                   {actionType === 'delete'
                     ? 'Are you sure you want to delete this profile?'
                     : 'Authentication Successful! Proceed to Edit?'}
                 </h4>
-                <p className="text-xs text-stone-600 leading-relaxed">
+                <p className="text-xs text-stone-600 font-sans leading-snug">
                   {actionType === 'delete'
                     ? `Deleting the profile for "${profile.name}" will remove it from the directory.`
                     : `Your Password has been verified. You can now edit the profile details for "${profile.name}".`}

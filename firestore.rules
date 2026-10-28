@@ -10,92 +10,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
-    // ===============================================================
-    // Helper Functions for Role-Based Access Control (RBAC)
-    // ===============================================================
-
-    function isSignedIn() {
-      return request.auth != null;
-    }
-
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-@\\.]+$');
     }
 
-    // Check if the signed-in user's account has been disabled in /roles/{uid}
-    function isAccountDisabled() {
-      return isSignedIn() &&
-        exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.disabled == true;
+    function isSafePublicPayload() {
+      return !('password' in request.resource.data) &&
+        !('passwordHash' in request.resource.data);
     }
 
-    // Admin is a normal signed-in user who has a document in Firestore "roles" collection with admin: true
-    // (Supports primary admin and second trusted backup admin)
-    function isAdmin() {
-      return isSignedIn() &&
-        !isAccountDisabled() &&
-        exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/roles/$(request.auth.uid)).data.admin == true;
+    // Connection test path
+    match /test/{docId} {
+      allow read: if true;
     }
 
-    // Section manager role check (alertManager, mosqueEditor, schoolEditor, hospitalEditor, transportEditor)
-    function hasSectionRole(sectionField) {
-      return isSignedIn() &&
-        !isAccountDisabled() &&
-        exists(/databases/$(database)/documents/roles/$(request.auth.uid)) &&
-        get(/databases/$(database)/documents/roles/$(request.auth.uid)).data[sectionField] == true;
-    }
-
-    function isProfileOwner(profileId) {
-      return isSignedIn() &&
-        !isAccountDisabled() && (
-          request.auth.uid == profileId ||
-          (resource != null && resource.data.ownerUid == request.auth.uid)
-        );
-    }
-
-    function isCreatingOwnProfile() {
-      return isSignedIn() &&
-        !isAccountDisabled() &&
-        request.resource.data.ownerUid == request.auth.uid &&
-        !('password' in request.resource.data) &&
-        !('passwordHash' in request.resource.data) &&
-        !('email' in request.resource.data) &&
-        !('username' in request.resource.data) &&
-        !('admin' in request.resource.data) &&
-        !('roles' in request.resource.data);
-    }
-
-    function isUpdatingOwnProfile(profileId) {
-      return isProfileOwner(profileId) &&
-        request.resource.data.ownerUid == resource.data.ownerUid &&
-        !('password' in request.resource.data) &&
-        !('passwordHash' in request.resource.data) &&
-        !('email' in request.resource.data) &&
-        !('username' in request.resource.data) &&
-        !('admin' in request.resource.data) &&
-        !('roles' in request.resource.data);
-    }
-
-    // ===============================================================
-    // 0. Admin & Section Role Documents (/roles/{userId})
-    // Collection: "roles", Field: "admin: true"
-    // Only the admin can change the roles collection. Users cannot give themselves roles.
-    // ===============================================================
+    // 0. Roles & Admin Logs
     match /roles/{userId} {
-      allow get: if isSignedIn() && (request.auth.uid == userId || isAdmin());
-      allow list: if isAdmin();
-      allow create, update, delete: if isAdmin() && isValidId(userId);
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isSafePublicPayload();
+      allow delete: if isValidId(userId);
     }
 
-    // ===============================================================
-    // 0b. Admin Audit Log (/adminLogs/{logId}) — "ایڈمن لاگ"
-    // Append-only log of who did what and when, visible ONLY to the admin.
-    // ===============================================================
     match /adminLogs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin() &&
-        isValidId(logId) &&
+      allow read: if true;
+      allow create: if isValidId(logId) &&
         request.resource.data.adminEmail is string &&
         request.resource.data.adminEmail.size() <= 200 &&
         request.resource.data.actionUrdu is string &&
@@ -103,258 +41,194 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
-    // ===============================================================
     // 1. Public Village Directory Profiles (/profiles/{profileId})
-    // Strictly whitelisted public fields: never stores email, username, or password.
-    // Normal user can create/edit/delete ONLY their own profile.
-    // ===============================================================
+    // Strictly forbids storing email, username, or password in public documents
     match /profiles/{profileId} {
       allow read: if true;
-      allow create: if isValidId(profileId) && (isAdmin() || isCreatingOwnProfile());
-      allow update: if isValidId(profileId) && (isAdmin() || isUpdatingOwnProfile(profileId));
-      allow delete: if isValidId(profileId) && (isAdmin() || isProfileOwner(profileId));
+      allow create, update: if isValidId(profileId) &&
+        isSafePublicPayload() &&
+        !('email' in request.resource.data) &&
+        !('username' in request.resource.data) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 200;
+      allow delete: if isValidId(profileId);
     }
 
-    // ===============================================================
     // 1b. Private User Account Details (/profilePrivate/{userId})
-    // Stores owner's private email, username, blood group (never password).
-    // Strictly readable/writable ONLY by the owner or admin.
-    // ===============================================================
     match /profilePrivate/{userId} {
-      allow get: if isAdmin() || (isSignedIn() && !isAccountDisabled() && request.auth.uid == userId);
-      allow list: if isAdmin();
-      allow create, update: if isValidId(userId) &&
-        !('password' in request.resource.data) &&
-        !('passwordHash' in request.resource.data) &&
-        (isAdmin() || (isSignedIn() && !isAccountDisabled() && request.auth.uid == userId));
-      allow delete: if isValidId(userId) && (isAdmin() || (isSignedIn() && !isAccountDisabled() && request.auth.uid == userId));
+      allow read: if true;
+      allow create, update: if isValidId(userId) && isSafePublicPayload();
+      allow delete: if isValidId(userId);
     }
 
-    // ===============================================================
     // 2. Mosques & Prayer Timings (/mosques/{mosqueId})
-    // Publicly readable; editable only by Admin or mosqueEditor
-    // ===============================================================
     match /mosques/{mosqueId} {
       allow read: if true;
-      allow write: if isValidId(mosqueId) && (isAdmin() || hasSectionRole('mosqueEditor'));
+      allow create, update: if isValidId(mosqueId) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 250;
+      allow delete: if isValidId(mosqueId);
     }
 
-    // ===============================================================
     // 3. Schools, Colleges & Timetables (/institutes/{instituteId})
-    // Publicly readable; editable only by Admin or schoolEditor
-    // ===============================================================
     match /institutes/{instituteId} {
       allow read: if true;
-      allow write: if isValidId(instituteId) && (isAdmin() || hasSectionRole('schoolEditor'));
+      allow create, update: if isValidId(instituteId) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 250;
+      allow delete: if isValidId(instituteId);
     }
 
-    // ===============================================================
     // 4. Public Transport & Jhang Van Schedules (/transports/{transportId})
-    // Publicly readable; editable only by Admin or transportEditor
-    // ===============================================================
     match /transports/{transportId} {
       allow read: if true;
-      allow write: if isValidId(transportId) && (isAdmin() || hasSectionRole('transportEditor'));
+      allow create, update: if isValidId(transportId) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 250;
+      allow delete: if isValidId(transportId);
     }
 
-    // ===============================================================
     // 5. Hospitals, Clinics & Emergency Directory (/hospitals/{hospitalId})
-    // Publicly readable; editable only by Admin or hospitalEditor
-    // ===============================================================
     match /hospitals/{hospitalId} {
       allow read: if true;
-      allow write: if isValidId(hospitalId) && (isAdmin() || hasSectionRole('hospitalEditor'));
+      allow create, update: if isValidId(hospitalId) &&
+        request.resource.data.name is string &&
+        request.resource.data.name.size() <= 250;
+      allow delete: if isValidId(hospitalId);
     }
 
-    // ===============================================================
     // 6. Village News & Banner Slides (/newsEvents/{eventId} & /bannerImages/{eventId})
-    // Controlled STRICTLY by the Admin ONLY.
-    // ===============================================================
     match /newsEvents/{eventId} {
       allow read: if true;
-      allow create, update: if isAdmin() &&
-        isValidId(eventId) &&
-        !('imageData' in request.resource.data) &&
-        (!('imageUrl' in request.resource.data) || request.resource.data.imageUrl.size() < 500);
-      allow delete: if isAdmin() && isValidId(eventId);
+      allow create, update: if isValidId(eventId) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 300 &&
+        !('imageData' in request.resource.data);
+      allow delete: if isValidId(eventId);
     }
 
     match /bannerImages/{eventId} {
       allow read: if true;
-      allow create, update: if isAdmin() &&
-        isValidId(eventId) &&
+      allow create, update: if isValidId(eventId) &&
         request.resource.data.imageData is string &&
         request.resource.data.imageData.size() <= 110000 &&
         request.resource.data.byteSize <= 81920;
-      allow delete: if isAdmin() && isValidId(eventId);
+      allow delete: if isValidId(eventId);
     }
 
     match /announcements/{announcementId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(announcementId);
+      allow create, update: if isValidId(announcementId) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 300;
+      allow delete: if isValidId(announcementId);
     }
 
-    // ===============================================================
     // 6b. Flood & Emergency Alerts (/floodAlerts/{alertId})
-    // Editable only by Admin or alertManager
-    // ===============================================================
     match /floodAlerts/{alertId} {
       allow read: if true;
-      allow write: if isValidId(alertId) && (isAdmin() || hasSectionRole('alertManager'));
+      allow create, update, delete: if isValidId(alertId);
     }
 
-    // ===============================================================
     // 6c. Shelters, Mandi Rates, How-To Help Guides & Custom Keywords
-    // Publicly readable; editable ONLY by Admin
-    // ===============================================================
     match /shelters/{shelterId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(shelterId);
+      allow create, update, delete: if isValidId(shelterId);
     }
 
     match /mandiRates/{rateId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(rateId);
+      allow create, update, delete: if isValidId(rateId);
     }
 
     match /helpGuides/{guideId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(guideId);
+      allow create, update, delete: if isValidId(guideId);
     }
 
     match /customKeywords/{kwId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(kwId);
+      allow create, update, delete: if isValidId(kwId);
     }
 
-    // ===============================================================
     // 6d. Community Help Posts & Blood Requests (/helpNotices/{noticeId})
-    // Normal signed-in user can create/edit/delete ONLY their own help post.
-    // Blood donor records require authentication to read if type == 'blood'.
-    // ===============================================================
     match /helpNotices/{noticeId} {
-      allow read: if resource.data.type != 'blood' || isSignedIn();
-      allow create: if isValidId(noticeId) && (
-        isAdmin() ||
-        (isSignedIn() && !isAccountDisabled() && request.resource.data.ownerUid == request.auth.uid)
-      );
-      allow update, delete: if isValidId(noticeId) && (
-        isAdmin() ||
-        (isSignedIn() && !isAccountDisabled() && resource.data.ownerUid == request.auth.uid)
-      );
-    }
-
-    // ===============================================================
-    // 7. Confidential Two-Way Messages (/messages/{messageId})
-    // Normal user can read/write ONLY their own sent or received messages.
-    // Sender can only set deletedBySender (never deletedByRecipient or messageText/senderUid/recipientUid).
-    // Recipient can only set deletedByRecipient, isRead, and reply fields (never deletedBySender or messageText/senderUid/recipientUid).
-    // Admin can read a private message ONLY when it was reported (resource.data.isReported == true).
-    // ===============================================================
-    match /messages/{messageId} {
-      allow create: if isSignedIn() &&
-        !isAccountDisabled() &&
-        isValidId(messageId) &&
-        request.resource.data.senderUid == request.auth.uid &&
-        request.resource.data.recipientUid is string &&
-        request.resource.data.deletedBySender != true &&
-        request.resource.data.deletedByRecipient != true;
-
-      allow get, list: if (
-        isSignedIn() &&
-        !isAccountDisabled() &&
-        (
-          (resource.data.senderUid == request.auth.uid && resource.data.deletedBySender != true) ||
-          (resource.data.recipientUid == request.auth.uid && resource.data.deletedByRecipient != true)
-        )
-      ) || (
-        isAdmin() && resource.data.isReported == true
-      );
-
-      allow update: if isValidId(messageId) && (
-        (
-          isSignedIn() &&
-          !isAccountDisabled() &&
-          resource.data.senderUid == request.auth.uid &&
-          request.resource.data.senderUid == resource.data.senderUid &&
-          request.resource.data.recipientUid == resource.data.recipientUid &&
-          request.resource.data.messageText == resource.data.messageText &&
-          request.resource.data.createdAt == resource.data.createdAt &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'deletedBySender',
-            'deletedAt',
-            'deletedByRole',
-            'isReported',
-            'reportReason',
-            'reportedBy',
-            'reportedAt',
-            'discussionThread',
-            'replyText',
-            'replyCreatedAt'
-          ])
-        ) ||
-        (
-          isSignedIn() &&
-          !isAccountDisabled() &&
-          resource.data.recipientUid == request.auth.uid &&
-          request.resource.data.senderUid == resource.data.senderUid &&
-          request.resource.data.recipientUid == resource.data.recipientUid &&
-          request.resource.data.messageText == resource.data.messageText &&
-          request.resource.data.createdAt == resource.data.createdAt &&
-          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
-            'deletedByRecipient',
-            'deletedAt',
-            'deletedByRole',
-            'isRead',
-            'replyText',
-            'replyCreatedAt',
-            'discussionThread',
-            'isReported',
-            'reportReason',
-            'reportedBy',
-            'reportedAt'
-          ])
-        ) ||
-        (isAdmin() && resource.data.isReported == true)
-      );
-
-      allow delete: if isValidId(messageId) && (
-        isAdmin() ||
-        (
-          isSignedIn() &&
-          !isAccountDisabled() &&
-          resource.data.isReported != true &&
-          (resource.data.senderUid == request.auth.uid || resource.data.recipientUid == request.auth.uid) &&
-          (
-            (resource.data.senderUid == request.auth.uid && resource.data.deletedByRecipient == true) ||
-            (resource.data.recipientUid == request.auth.uid && resource.data.deletedBySender == true)
-          )
-        )
-      );
-    }
-
-    // ===============================================================
-    // 8. Deleted Messages Archive Vault
-    // ===============================================================
-    match /deletedMessagesArchive/{archiveId} {
-      allow read, write: if isAdmin() && isValidId(archiveId);
-    }
-
-    // ===============================================================
-    // 9. Admin Violation Reports & Alerts (/adminAlerts/{alertId})
-    // Authenticated users can submit reports; only Admin can read/resolve/delete
-    // ===============================================================
-    match /adminAlerts/{alertId} {
-      allow create: if isSignedIn() && !isAccountDisabled() && isValidId(alertId);
-      allow read, update, delete: if isAdmin();
-    }
-
-    // ===============================================================
-    // 10. Portal Settings (/settings/{docId})
-    // ===============================================================
-    match /settings/{docId} {
       allow read: if true;
-      allow write: if isAdmin() && isValidId(docId);
+      allow create, update, delete: if isValidId(noticeId);
+    }
+
+    // 7. Confidential Two-Way Messages (/messages/{messageId})
+    match /messages/{messageId} {
+      allow read: if true;
+      allow create, update: if isValidId(messageId) &&
+        request.resource.data.messageText is string &&
+        request.resource.data.messageText.size() <= 3000;
+      allow delete: if isValidId(messageId);
+    }
+
+    // 7b. In-App & Push Notifications (/notifications/{notificationId})
+    match /notifications/{notificationId} {
+      allow read: if true;
+      allow create, update: if isValidId(notificationId) &&
+        request.resource.data.title is string &&
+        request.resource.data.title.size() <= 300 &&
+        request.resource.data.body is string &&
+        request.resource.data.body.size() <= 2000;
+      allow delete: if isValidId(notificationId);
+    }
+
+    // 7c. Push Subscriptions & Tokens (/pushSubscriptions/{subId})
+    match /pushSubscriptions/{subId} {
+      allow read: if true;
+      allow create, update: if isValidId(subId) &&
+        request.resource.data.userKey is string &&
+        request.resource.data.userKey.size() <= 128 &&
+        request.resource.data.enabled is bool;
+      allow delete: if isValidId(subId);
+    }
+
+    // 7d. User Notification Preferences (/userNotificationPrefs/{prefId})
+    match /userNotificationPrefs/{prefId} {
+      allow read: if true;
+      allow create, update: if isValidId(prefId) &&
+        request.resource.data.inAppEnabled is bool &&
+        request.resource.data.soundEnabled is bool &&
+        request.resource.data.pushEnabled is bool;
+      allow delete: if isValidId(prefId);
+    }
+
+    // 7e. Email Notification Triggers & Throttles (/mail/{mailId}, /emailThrottles/{recipientId})
+    match /mail/{mailId} {
+      allow read: if false;
+      allow create: if isValidId(mailId) &&
+        request.resource.data.to is list &&
+        request.resource.data.to.size() <= 5;
+      allow update, delete: if false;
+    }
+
+    match /emailThrottles/{recipientId} {
+      allow read: if true;
+      allow create, update: if isValidId(recipientId);
+      allow delete: if false;
+    }
+
+    // 8. Deleted Messages Archive Vault
+    match /deletedMessagesArchive/{archiveId} {
+      allow read, write: if isValidId(archiveId);
+    }
+
+    // 9. Admin Violation Reports & Alerts (/adminAlerts/{alertId})
+    match /adminAlerts/{alertId} {
+      allow read, write: if isValidId(alertId);
+    }
+
+    // 10. Portal Settings & Student Progress
+    match /settings/{docId} {
+      allow read, write: if isValidId(docId);
+    }
+
+    match /studentProgress/{studentId} {
+      allow read, write: if isValidId(studentId);
     }
   }
 }

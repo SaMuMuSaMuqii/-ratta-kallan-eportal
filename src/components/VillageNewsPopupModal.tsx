@@ -26,6 +26,7 @@ import {
   playNotificationChime,
 } from '../utils/speech';
 import {
+  getBannerSlideImageDoc,
   loadBannerBenefitsStripConfig,
   loadBannerBenefitsStripConfigSync,
   DEFAULT_BANNER_BENEFIT_PAIRS,
@@ -50,6 +51,7 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
   const [stripConfig, setStripConfig] = useState<BannerBenefitsStripConfig>(() =>
     loadBannerBenefitsStripConfigSync()
   );
+  const [loadedBannerMap, setLoadedBannerMap] = useState<Record<string, string>>({});
 
   React.useEffect(() => {
     if (!isOpen) return;
@@ -57,10 +59,24 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
     loadBannerBenefitsStripConfig().then((cfg) => {
       if (mounted && cfg) setStripConfig(cfg);
     });
+    Promise.all(
+      events.map(async (ev) => {
+        if (ev.skipBannerImage) return [ev.id, ''] as const;
+        const docData = await getBannerSlideImageDoc(ev.id);
+        return [ev.id, docData?.imageData || ev.imageUrl || ''] as const;
+      })
+    ).then((pairs) => {
+      if (!mounted) return;
+      const nextMap: Record<string, string> = {};
+      pairs.forEach(([id, src]) => {
+        if (src) nextMap[id] = src;
+      });
+      setLoadedBannerMap(nextMap);
+    });
     return () => {
       mounted = false;
     };
-  }, [isOpen]);
+  }, [isOpen, events]);
 
   const handleClose = () => {
     stopSpeaking();
@@ -321,24 +337,46 @@ export const VillageNewsPopupModal: React.FC<VillageNewsPopupModalProps> = ({
           )}
 
           {/* Banner Illustration Image inside Main Popup */}
-          {!currentEvent.skipBannerImage && (
-            <div className="rounded-2xl overflow-hidden border-2 border-emerald-600/80 shadow-md bg-stone-950">
-              <img
-                src={currentEvent.imageUrl || '/banners/portal-benefits-banner.svg'}
-                alt={currentEvent.title}
-                className="w-full h-40 sm:h-52 object-cover"
-              />
-            </div>
-          )}
+          {!currentEvent.skipBannerImage &&
+            (loadedBannerMap[currentEvent.id] || currentEvent.imageUrl) && (
+              <div className="relative rounded-2xl overflow-hidden border-2 border-emerald-600/80 shadow-md bg-stone-950 h-44 sm:h-56">
+                {currentEvent.imageFit === 'contain' && (
+                  <img
+                    src={loadedBannerMap[currentEvent.id] || currentEvent.imageUrl}
+                    alt=""
+                    aria-hidden="true"
+                    className="absolute inset-0 w-full h-full object-cover blur-md opacity-35 scale-110 pointer-events-none"
+                  />
+                )}
+                <img
+                  src={loadedBannerMap[currentEvent.id] || currentEvent.imageUrl}
+                  alt={currentEvent.title}
+                  className={`relative z-10 w-full h-full ${
+                    currentEvent.imageFit === 'contain' ? 'object-contain' : 'object-cover'
+                  }`}
+                  style={{
+                    objectPosition: `${currentEvent.focalX ?? 50}% ${currentEvent.focalY ?? 50}%`,
+                  }}
+                />
+              </div>
+            )}
 
           {/* Main Title */}
-          <h2 className="text-lg sm:text-xl font-bold font-nastaliq text-emerald-950 leading-snug">
+          <h2 className="text-base sm:text-xl font-bold font-nastaliq text-emerald-950 leading-[1.8] break-words text-right">
             {currentEvent.title}
           </h2>
 
-          {/* Detailed Content (Preserves numbered step-by-step formatting) */}
-          <div className="bg-emerald-50/80 p-4 rounded-2xl border-2 border-emerald-300 text-stone-900 text-xs sm:text-sm leading-loose whitespace-pre-line font-bold shadow-2xs">
-            {currentEvent.content}
+          {/* Detailed Content (Preserves numbered step-by-step formatting with clean line alignment) */}
+          <div className="bg-emerald-50/90 p-3.5 sm:p-4 rounded-2xl border-2 border-emerald-300 text-stone-900 text-xs sm:text-sm font-bold shadow-2xs space-y-2 text-right">
+            {(currentEvent.content || '')
+              .split('\n')
+              .map((line) => line.trim())
+              .filter(Boolean)
+              .map((line, i) => (
+                <p key={i} className="leading-[1.9] break-words">
+                  {line}
+                </p>
+              ))}
           </div>
 
           {/* PART A3: Compact Two-Line Uses & Benefits Strip inside Village News Popup */}
