@@ -18,6 +18,10 @@ import {
   transliterateGurmukhiToShahmukhi,
   stripUrduDiacritics,
   performUniversalSearch,
+  expandSynonyms,
+  extractSpecificQueryIdentifiers,
+  searchPeopleDatabase,
+  PeopleSearchAnalysis,
   PORTAL_FEATURES_INDEX,
   PortalFeatureSearchItem,
 } from './searchEngine';
@@ -381,9 +385,9 @@ const SCHOOL_KEYWORDS = [
   'کالج',
   'مدرسہ',
   'تعلیم',
-  'استاد',
-  'ماسٹر',
   'پرنسپل',
+  'ہیڈ ماسٹر',
+  'ہیڈ مسٹریس',
   'کلاس',
   'داخلہ',
   'چھٹی',
@@ -755,12 +759,29 @@ function containsAny(normQuery: string, rawLower: string, keywords: string[]): b
 function rankProfilesByQuery(
   profiles: VillageProfile[],
   meaningfulTokens: string[],
-  targetCategory?: VillageProfile['category']
+  targetCategory?: VillageProfile['category'],
+  categoryTerms: string[] = []
 ): VillageProfile[] {
   if (meaningfulTokens.length === 0 && !targetCategory) return profiles;
 
+  const normCatTerms = new Set<string>();
+  categoryTerms.forEach((t) => {
+    const nt = normalizeSearchString(t);
+    if (nt) {
+      normCatTerms.add(nt);
+      nt.split(/\s+/).forEach((w) => {
+        if (w) normCatTerms.add(w);
+      });
+    }
+  });
+
+  // Identify specific person/shop name tokens that are not generic stop words or category terms
+  const rawSpecificIds = extractSpecificQueryIdentifiers(meaningfulTokens.join(' '));
+  const specificIds = rawSpecificIds.filter((idTok) => !normCatTerms.has(idTok));
+
   const scored = profiles.map((p) => {
     let score = 0;
+    let matchedSpecificCount = 0;
     const normName = normalizeSearchString(p.name);
     const normBiz = normalizeSearchString(p.businessName);
     const normAddr = normalizeSearchString(p.address);
@@ -772,25 +793,49 @@ function rankProfilesByQuery(
 
     for (const tok of meaningfulTokens) {
       if (!tok || tok.length < 2) continue;
-      if (normName === tok || normName.split(/\s+/).includes(tok)) {
-        score += 350; // Exact name word match
-      } else if (normName.includes(tok)) {
-        score += 280; // Name substring match
+      const expanded = expandSynonyms(tok);
+      let tokMatchedOnProfile = false;
+
+      for (const syn of expanded) {
+        if (!syn || syn.length < 2) continue;
+        if (normName === syn || normName.split(/\s+/).includes(syn)) {
+          score += syn === tok ? 350 : 310; // Exact name word match
+          tokMatchedOnProfile = true;
+        } else if (normName.includes(syn)) {
+          score += syn === tok ? 280 : 250; // Name substring match
+          tokMatchedOnProfile = true;
+        }
+        if (normBiz.includes(syn)) {
+          score += syn === tok ? 210 : 180; // Business / category title match
+          tokMatchedOnProfile = true;
+        }
+        if (normAddr.includes(syn)) {
+          score += syn === tok ? 130 : 110; // Area / Mohalla match
+          tokMatchedOnProfile = true;
+        }
+        if (normServices.includes(syn)) {
+          score += syn === tok ? 80 : 60; // Service match
+          tokMatchedOnProfile = true;
+        }
       }
-      if (normBiz.includes(tok)) {
-        score += 210; // Business / category title match
-      }
-      if (normAddr.includes(tok)) {
-        score += 130; // Area / Mohalla match
-      }
-      if (normServices.includes(tok)) {
-        score += 80; // Service match
+
+      if (tokMatchedOnProfile && specificIds.includes(tok)) {
+        matchedSpecificCount += 1;
       }
     }
 
     if (p.isVerified) score += 5;
-    return { profile: p, score };
+    return { profile: p, score, matchedSpecificCount };
   });
+
+  // If the user asked for a specific person/shop name (e.g. "خالد الیکٹریشن" or "طارق سولر")
+  // only return profiles that actually match that specific name!
+  if (specificIds.length > 0) {
+    const specificMatches = scored
+      .filter((s) => s.matchedSpecificCount > 0)
+      .sort((a, b) => b.score - a.score);
+    return specificMatches.map((s) => s.profile);
+  }
 
   scored.sort((a, b) => b.score - a.score);
   const hasHighNameOrAreaMatch = scored.some((s) => s.score >= 330);
@@ -1233,9 +1278,9 @@ export function answerVoiceQuestion(
     const displayLines = listToShow.map(
       (r) => `🌾 ${r.cropNameUrdu}: ${r.rateText} (${r.marketName})`
     );
-    const spokenLines = listToShow
-      .slice(0, 3)
-      .map((r) => `${r.cropNameUrdu} کا ریٹ ${r.rateText} ہے۔`);
+    const spokenLines = listToShow.map(
+      (r) => `${r.cropNameUrdu} کا ریٹ ${r.rateText}، ${r.marketName}۔`
+    );
     const matchedItems: VoiceMatchedItem[] = listToShow.map((r) => ({
       id: r.id,
       title: r.cropNameUrdu,
@@ -1245,7 +1290,7 @@ export function answerVoiceQuestion(
     return {
       intent: 'mandi',
       displayText: `📊 آج کے منڈی اور زرعی ریٹس:\n${displayLines.join('\n')}`,
-      spokenText: `آج کے منڈی ریٹ۔ ${spokenLines.join(' ')}`,
+      spokenText: `آج کے منڈی اور زرعی ریٹس۔ ${spokenLines.join(' ')}`,
       phoneNumbers: [],
       matchedItems,
       allCandidateItems: matchedItems,
@@ -1503,7 +1548,7 @@ export function answerVoiceQuestion(
     return {
       intent: 'help_post',
       displayText: displayLines.join('\n'),
-      spokenText: spokenLines[0] || displayLines[0],
+      spokenText: spokenLines.join(' ') || displayLines.join(' '),
       phoneNumbers: phones,
       matchedItems,
       exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
@@ -1794,105 +1839,7 @@ export function answerVoiceQuestion(
     };
   }
 
-  // 7. Check Doctors & Hospitals / Clinics (Prefer exact name match, then category, then area)
-  if (containsAny(normQuery, rawLower, DOCTOR_KEYWORDS)) {
-    const rawAvailableDoctors = dataset.profiles.filter(
-      (p) => p.category === 'doctor' && isProfileAvailableToday(p)
-    );
-    const rankedDoctors = rankProfilesByQuery(rawAvailableDoctors, meaningfulTokens, 'doctor');
-
-    const phones: PhoneContactItem[] = [];
-    const matchedItems: VoiceMatchedItem[] = [];
-    const displayParts: string[] = [];
-    const spokenParts: string[] = [];
-    let staleness: string | undefined;
-
-    rankedDoctors.forEach((doc) => {
-      const st = getStalenessNotice(doc.createdAt, nowMs);
-      if (st && !staleness) staleness = st;
-
-      const hours =
-        doc.openingTime && doc.closingTime ? ` (اوقات: ${doc.openingTime} تا ${doc.closingTime})` : '';
-      displayParts.push(
-        `🩺 ${doc.name} (${doc.businessName}) ${doc.address} میں ہیں۔ آج موجود ہیں${hours}۔ فون نمبر: ${doc.mobile}۔`
-      );
-      spokenParts.push(
-        `${doc.name}، ${doc.businessName}، ${doc.address} میں ہیں۔ آج موجود ہیں۔ فون نمبر: ${formatPhoneDigitsForSpeech(
-          doc.mobile,
-          lang
-        )}۔`
-      );
-      phones.push({
-        label: `${doc.name} (${doc.businessName})`,
-        phone: doc.mobile,
-        sublabel: doc.address,
-      });
-      matchedItems.push({
-        id: doc.id,
-        title: `${doc.name} (${doc.businessName})`,
-        categoryLabel: 'ڈاکٹر و کلینک (آج موجود)',
-        area: doc.address,
-        phone: doc.mobile,
-      });
-    });
-
-    dataset.hospitals.slice(0, 2).forEach((h) => {
-      const st = getStalenessNotice(h.lastUpdated, nowMs);
-      if (st && !staleness) staleness = st;
-
-      displayParts.push(
-        `🏥 ${h.name} (${h.address}): ${h.timing}۔ فون نمبر: ${h.contact}۔`
-      );
-      spokenParts.push(
-        `${h.name}، ${h.address}۔ ${h.timing}۔ فون نمبر: ${formatPhoneDigitsForSpeech(
-          h.contact,
-          lang
-        )}۔`
-      );
-      if (h.contact) {
-        phones.push({
-          label: h.name,
-          phone: h.contact,
-          sublabel: h.timing,
-        });
-      }
-      matchedItems.push({
-        id: h.id,
-        title: h.name,
-        categoryLabel: h.categoryUrdu || 'ہسپتال و ایمرجنسی',
-        area: h.address,
-        phone: h.contact,
-      });
-    });
-
-    if (displayParts.length === 0) {
-      const msg =
-        'اس وقت کوئی ڈاکٹر آج دستیاب فہرست میں موجود نہیں ہے۔ ایمرجنسی کے لیے 1122 پر کال کریں۔';
-      return {
-        intent: 'doctor',
-        displayText: msg,
-        spokenText: 'اس وقت کوئی ڈاکٹر آج دستیاب نہیں ہے۔ ایمرجنسی کے لیے ایک ایک دو دو پر کال کریں۔',
-        phoneNumbers: [{ label: 'ریسکیو 1122', phone: '1122', sublabel: 'ایمرجنسی' }],
-        matchedItems: [],
-        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
-      };
-    }
-
-    const displayText = displayParts.join('\n') + (staleness ? `\n(${staleness})` : '');
-    const spokenText = spokenParts.join(' ') + (staleness ? ` ${staleness}` : '');
-
-    return {
-      intent: 'doctor',
-      displayText,
-      spokenText,
-      phoneNumbers: phones,
-      matchedItems,
-      stalenessNotice: staleness,
-      exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
-    };
-  }
-
-  // 8. Check News & Announcements
+  // 6.5 Check News & Announcements before people search so news queries are answered directly
   if (containsAny(normQuery, rawLower, NEWS_KEYWORDS)) {
     const events = dataset.newsEvents || [];
     const anns = dataset.announcements || [];
@@ -1951,6 +1898,536 @@ export function answerVoiceQuestion(
     };
   }
 
+  // 6.8 Dedicated People Search System (Searches `dataset.profiles` for any person in Urdu or English)
+  // Strictly enforces:
+  // - Retrieving ONLY information belonging to that exact person's database record
+  // - Clearly stating when a requested field (phone, WhatsApp, address, family/father's name, charges, timing, services) is missing in the records
+  // - Asking the user to select the right person when multiple people share similar names
+  // - Never generating fake information, never substituting another person, and never showing unrelated school records
+  const peopleSearchResult = searchPeopleDatabase(cleanedRaw, dataset.profiles);
+  if (peopleSearchResult.status !== 'not_people_query') {
+    const { analysis } = peopleSearchResult;
+    const useEn = lang === 'en' || analysis.isEnglishQuery;
+
+    if (peopleSearchResult.status === 'exact' && peopleSearchResult.matchedProfiles.length === 1) {
+      const person = sanitizePublicProfile(peopleSearchResult.matchedProfiles[0]);
+      const staleness = getStalenessNotice(person.createdAt, nowMs);
+      const specificFields = analysis.requestedFields.filter((f) => f !== 'profile');
+      const displayLines: string[] = [];
+      const spokenLines: string[] = [];
+      const phones: PhoneContactItem[] = [];
+      const matchedItems: VoiceMatchedItem[] = [];
+      const availToday = isProfileAvailableToday(person);
+
+      if (specificFields.length > 0) {
+        for (const field of specificFields) {
+          if (field === 'phone') {
+            if (person.mobile && person.mobile.trim()) {
+              displayLines.push(
+                useEn
+                  ? `📞 Phone number of ${person.name} (${person.businessName || person.category}): ${person.mobile}.`
+                  : `📞 ${person.name} (${person.businessName || person.category}) کا فون نمبر: ${person.mobile} ہے۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The phone number of ${person.name} is ${person.mobile}.`
+                  : `${person.name} کا فون نمبر ${formatPhoneDigitsForSpeech(person.mobile, lang)} ہے۔`
+              );
+              phones.push({
+                label: `${person.name} (${person.businessName || person.category})`,
+                phone: person.mobile,
+                sublabel: person.address || '',
+              });
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, the phone number for ${person.name} is not available in the records. (معذرت، ${person.name} کا فون نمبر ریکارڈ میں موجود نہیں ہے)`
+                  : `معذرت، ${person.name} کا فون نمبر ریکارڈ میں موجود نہیں ہے۔ (Sorry, the phone number is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, the phone number for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کا فون نمبر ریکارڈ میں موجود نہیں ہے۔`
+              );
+            }
+          } else if (field === 'whatsapp') {
+            if (person.whatsapp && person.whatsapp.trim()) {
+              displayLines.push(
+                useEn
+                  ? `💬 WhatsApp number of ${person.name} (${person.businessName || person.category}): ${person.whatsapp}.`
+                  : `💬 ${person.name} (${person.businessName || person.category}) کا واٹس ایپ نمبر: ${person.whatsapp} ہے۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The WhatsApp number of ${person.name} is ${person.whatsapp}.`
+                  : `${person.name} کا واٹس ایپ نمبر ${formatPhoneDigitsForSpeech(person.whatsapp, lang)} ہے۔`
+              );
+              phones.push({
+                label: `${person.name} (WhatsApp)`,
+                phone: person.whatsapp,
+                sublabel: person.businessName || person.address || '',
+              });
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, the WhatsApp number for ${person.name} is not available in the records. (معذرت، ${person.name} کا واٹس ایپ نمبر ریکارڈ میں موجود نہیں ہے)`
+                  : `معذرت، ${person.name} کا واٹس ایپ نمبر ریکارڈ میں موجود نہیں ہے۔ (Sorry, the WhatsApp number is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, the WhatsApp number for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کا واٹس ایپ نمبر ریکارڈ میں موجود نہیں ہے۔`
+              );
+            }
+          } else if (field === 'address') {
+            if (person.address && person.address.trim()) {
+              const landmark = person.locationLandmark ? ` (${person.locationLandmark})` : '';
+              displayLines.push(
+                useEn
+                  ? `📍 Address of ${person.name} (${person.businessName || person.category}): ${person.address}${landmark}.`
+                  : `📍 ${person.name} (${person.businessName || person.category}) کا پتہ: ${person.address}${landmark} ہے۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The address of ${person.name} is ${person.address}.`
+                  : `${person.name} کا پتہ ${person.address} ہے۔`
+              );
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, the address for ${person.name} is not available in the records. (معذرت، ${person.name} کا پتہ ریکارڈ میں موجود نہیں ہے)`
+                  : `معذرت، ${person.name} کا پتہ ریکارڈ میں موجود نہیں ہے۔ (Sorry, the address is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, the address for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کا پتہ ریکارڈ میں موجود نہیں ہے۔`
+              );
+            }
+          } else if (field === 'family') {
+            if (person.fatherName && person.fatherName.trim()) {
+              displayLines.push(
+                useEn
+                  ? `👨‍👦 Father's name / family record of ${person.name}: ${person.fatherName}.`
+                  : `👨‍👦 ${person.name} کے والد کا نام (ولدیت / خاندانی تفصیل): ${person.fatherName} ہے۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The father's name of ${person.name} is ${person.fatherName}.`
+                  : `${person.name} کے والد کا نام ${person.fatherName} ہے۔`
+              );
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, family details / father's name for ${person.name} is not available in the records. (معذرت، ${person.name} کی ولدیت یا خاندانی تفصیلات ریکارڈ میں موجود نہیں ہیں)`
+                  : `معذرت، ${person.name} کی ولدیت یا خاندانی تفصیلات ریکارڈ میں موجود نہیں ہیں۔ (Sorry, family details / father's name is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, family details for ${person.name} are not available in the records.`
+                  : `معذرت، ${person.name} کی ولدیت یا خاندانی تفصیلات ریکارڈ میں موجود نہیں ہیں۔`
+              );
+            }
+          } else if (field === 'charges') {
+            if (person.chargesDescription && person.chargesDescription.trim()) {
+              displayLines.push(
+                useEn
+                  ? `💰 Charges / rates of ${person.name} (${person.businessName || person.category}): ${person.chargesDescription}.`
+                  : `💰 ${person.name} (${person.businessName || person.category}) کا ریٹ / معاوضہ: ${person.chargesDescription} ہے۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The charges of ${person.name} are ${person.chargesDescription}.`
+                  : `${person.name} کا ریٹ ${person.chargesDescription} ہے۔`
+              );
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, rate / charges information for ${person.name} is not available in the records. (معذرت، ${person.name} کے ریٹ یا معاوضے کی تفصیل ریکارڈ میں موجود نہیں ہے)`
+                  : `معذرت، ${person.name} کے ریٹ یا معاوضے کی تفصیل ریکارڈ میں موجود نہیں ہے۔ (Sorry, charges information is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, charges information for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کے ریٹ کی تفصیل ریکارڈ میں موجود نہیں ہے۔`
+              );
+            }
+          } else if (field === 'timing') {
+            if (
+              (person.openingTime && person.openingTime.trim()) ||
+              (person.closingTime && person.closingTime.trim())
+            ) {
+              const brk = person.breakTime
+                ? useEn
+                  ? ` (Break: ${person.breakTime})`
+                  : ` (وقفہ: ${person.breakTime})`
+                : '';
+              displayLines.push(
+                useEn
+                  ? `⏰ Timings of ${person.name} (${person.businessName || person.category}): ${person.openingTime || ''} to ${person.closingTime || ''}${brk}.`
+                  : `⏰ ${person.name} (${person.businessName || person.category}) کے اوقاتِ کار: ${person.openingTime || ''} تا ${person.closingTime || ''}${brk} ہیں۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `The timings of ${person.name} are ${person.openingTime || ''} to ${person.closingTime || ''}.`
+                  : `${person.name} کے اوقاتِ کار ${person.openingTime || ''} تا ${person.closingTime || ''} ہیں۔`
+              );
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, timing information for ${person.name} is not available in the records. (معذرت، ${person.name} کے اوقاتِ کار ریکارڈ میں موجود نہیں ہیں)`
+                  : `معذرت، ${person.name} کے اوقاتِ کار ریکارڈ میں موجود نہیں ہیں۔ (Sorry, timing information is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, timing information for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کے اوقاتِ کار ریکارڈ میں موجود نہیں ہیں۔`
+              );
+            }
+          } else if (field === 'services') {
+            if (
+              (person.services && person.services.length > 0) ||
+              (person.businessName && person.businessName.trim())
+            ) {
+              const srvList =
+                person.services && person.services.length > 0
+                  ? person.services.join(useEn ? ', ' : '، ')
+                  : '';
+              displayLines.push(
+                useEn
+                  ? `🛠️ Business / Services of ${person.name}: ${person.businessName || ''}${srvList ? ` — ${srvList}` : ''}.`
+                  : `🛠️ ${person.name} کا کاروبار و خدمات: ${person.businessName || ''}${srvList ? ` — ${srvList}` : ''}۔`
+              );
+              spokenLines.push(
+                useEn
+                  ? `${person.name}, ${person.businessName || ''}. Services: ${srvList}.`
+                  : `${person.name}، ${person.businessName || ''}۔ خدمات: ${srvList}۔`
+              );
+            } else {
+              displayLines.push(
+                useEn
+                  ? `Sorry, services information for ${person.name} is not available in the records. (معذرت، ${person.name} کی خدمات کی تفصیل ریکارڈ میں موجود نہیں ہے)`
+                  : `معذرت، ${person.name} کی خدمات کی تفصیل ریکارڈ میں موجود نہیں ہے۔ (Sorry, services information is not available in the records.)`
+              );
+              spokenLines.push(
+                useEn
+                  ? `Sorry, services information for ${person.name} is not available in the records.`
+                  : `معذرت، ${person.name} کی خدمات کی تفصیل ریکارڈ میں موجود نہیں ہے۔`
+              );
+            }
+          }
+        }
+      } else {
+        // Full profile summary using ONLY existing fields on `person`
+        const fatherPart =
+          person.fatherName && person.fatherName.trim()
+            ? useEn
+              ? `, Father's Name: ${person.fatherName}`
+              : ` (ولدیت: ${person.fatherName})`
+            : '';
+        const bizPart =
+          person.businessName && person.businessName.trim()
+            ? ` (${person.businessName})`
+            : '';
+        const addrPart =
+          person.address && person.address.trim()
+            ? useEn
+              ? `, Address: ${person.address}`
+              : `، پتہ: ${person.address}`
+            : '';
+        const ratePart =
+          person.chargesDescription && person.chargesDescription.trim()
+            ? useEn
+              ? `, Charges: ${person.chargesDescription}`
+              : `، ریٹ: ${person.chargesDescription}`
+            : '';
+        const hoursPart =
+          person.openingTime && person.closingTime
+            ? useEn
+              ? `, Timings: ${person.openingTime} to ${person.closingTime}`
+              : `، اوقات: ${person.openingTime} تا ${person.closingTime}`
+            : '';
+        const phonePart =
+          person.mobile && person.mobile.trim()
+            ? useEn
+              ? `. Phone number: ${person.mobile}.`
+              : `۔ فون نمبر: ${person.mobile}۔`
+            : useEn
+            ? `. Phone number: Not available in records.`
+            : `۔ فون نمبر: ریکارڈ میں موجود نہیں۔`;
+
+        displayLines.push(
+          useEn
+            ? `✅ ${person.name}${fatherPart}${bizPart}${addrPart}${ratePart}${hoursPart}${phonePart}`
+            : `✅ ${person.name}${fatherPart}${bizPart}${addrPart}۔ ${availToday ? 'آج موجود ہیں' : 'ریکارڈ موجود ہے'}${ratePart}${hoursPart}${phonePart}`
+        );
+        spokenLines.push(
+          useEn
+            ? `${person.name}${bizPart}${addrPart}${phonePart}`
+            : `${person.name}${fatherPart}، ${person.businessName || ''}، ${person.address || ''}۔ ${
+                person.mobile
+                  ? `فون نمبر: ${formatPhoneDigitsForSpeech(person.mobile, lang)}۔`
+                  : 'فون نمبر ریکارڈ میں موجود نہیں ہے۔'
+              }`
+        );
+        if (person.mobile && person.mobile.trim()) {
+          phones.push({
+            label: `${person.name} (${person.businessName || person.category})`,
+            phone: person.mobile,
+            sublabel: person.address || '',
+          });
+        }
+      }
+
+      matchedItems.push({
+        id: person.id,
+        title: `${person.name}${person.businessName ? ` (${person.businessName})` : ''}`,
+        categoryLabel: person.customCategory || person.category,
+        area: person.address || 'رتہ کلاں',
+        phone: person.mobile && person.mobile.trim() ? person.mobile : undefined,
+        badgeText: availToday ? 'آج دستیاب' : 'ریکارڈ موجود',
+      });
+
+      return {
+        intent: person.category === 'doctor' ? 'doctor' : 'worker',
+        displayText: displayLines.join('\n') + (staleness ? `\n(${staleness})` : ''),
+        spokenText: spokenLines.join(' ') + (staleness ? ` ${staleness}` : ''),
+        phoneNumbers: phones,
+        matchedItems,
+        stalenessNotice: staleness,
+        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+      };
+    }
+
+    if (peopleSearchResult.status === 'multiple') {
+      const candidates = peopleSearchResult.matchedProfiles;
+      const fieldSuffixUrdu =
+        analysis.primaryField === 'phone'
+          ? ' کا فون نمبر'
+          : analysis.primaryField === 'address'
+          ? ' کا پتہ'
+          : analysis.primaryField === 'family'
+          ? ' کے والد کا نام'
+          : analysis.primaryField === 'whatsapp'
+          ? ' کا واٹس ایپ نمبر'
+          : analysis.primaryField === 'charges'
+          ? ' کا ریٹ'
+          : analysis.primaryField === 'timing'
+          ? ' کے اوقات'
+          : '';
+      const fieldSuffixEn =
+        analysis.primaryField === 'phone'
+          ? ' phone number'
+          : analysis.primaryField === 'address'
+          ? ' address'
+          : analysis.primaryField === 'family'
+          ? ' father name'
+          : analysis.primaryField === 'whatsapp'
+          ? ' whatsapp'
+          : analysis.primaryField === 'charges'
+          ? ' charges'
+          : analysis.primaryField === 'timing'
+          ? ' timings'
+          : '';
+
+      const candidateSummaryUrdu = candidates
+        .map((c, idx) => `${idx + 1}. ${c.name} (${c.businessName || c.category}) — ${c.address || 'رتہ کلاں'}`)
+        .join('\n');
+      const candidateSummaryEn = candidates
+        .map((c, idx) => `${idx + 1}. ${c.name} (${c.businessName || c.category}) — ${c.address || 'Ratta Kallan'}`)
+        .join('\n');
+
+      const displayText = useEn
+        ? `Multiple people (${candidates.length}) with similar names were found in the records:\n${candidateSummaryEn}\nPlease select the right person below (براہ کرم درست شخص کا انتخاب کریں):`
+        : `اس نام سے ملتے جلتے ${candidates.length} افراد ریکارڈ میں موجود ہیں:\n${candidateSummaryUrdu}\nبراہ کرم درست شخص کا انتخاب کریں (Please select the right person):`;
+
+      const spokenText = useEn
+        ? `Multiple people with similar names were found: ${candidates.map((c) => c.name).join(', ')}. Please select the right person.`
+        : `اس نام سے ملتے جلتے ${candidates.length} افراد ریکارڈ میں موجود ہیں: ${candidates.map((c) => c.name).join('، ')}۔ براہ کرم درست شخص کا انتخاب کریں۔`;
+
+      return {
+        intent: 'unclear',
+        displayText,
+        spokenText,
+        phoneNumbers: [],
+        matchedItems: candidates.map((c) => ({
+          id: c.id,
+          title: `${c.name} (${c.businessName || c.category})`,
+          categoryLabel: c.customCategory || c.category,
+          area: c.address || 'رتہ کلاں',
+          phone: c.mobile && c.mobile.trim() ? c.mobile : undefined,
+          badgeText: 'نام منتخب کریں',
+        })),
+        needsClarification: true,
+        clarificationOptions: candidates.map((c) =>
+          useEn ? `${c.name}${fieldSuffixEn}` : `${c.name}${fieldSuffixUrdu}`
+        ),
+        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+      };
+    }
+
+    if (peopleSearchResult.status === 'not_found') {
+      // Never return another person as a substitute and never return school records!
+      const notFoundDisplay = useEn
+        ? `Sorry, no profile or record matching "${cleanedRaw}" is available in the database. (معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں — مجھے معلوم نہیں)`
+        : `معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں ("${cleanedRaw}" کے نام سے کوئی ریکارڈ موجود نہیں ہے — معاف کریں، مجھے معلوم نہیں)۔`;
+      const notFoundSpoken = useEn
+        ? `Sorry, this information is not available in the records.`
+        : `معذرت، یہ معلومات فی الحال پورٹل کے ریکارڈ میں دستیاب نہیں ہیں، مجھے معلوم نہیں۔`;
+
+      return {
+        intent: 'not_found',
+        displayText: notFoundDisplay,
+        spokenText: notFoundSpoken,
+        phoneNumbers: [],
+        matchedItems: [],
+        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+      };
+    }
+  }
+
+  // 7. Check Doctors & Hospitals / Clinics (Prefer exact name match, then category, then area)
+  if (containsAny(normQuery, rawLower, DOCTOR_KEYWORDS)) {
+    const rawAvailableDoctors = dataset.profiles.filter(
+      (p) => p.category === 'doctor' && isProfileAvailableToday(p)
+    );
+    const rankedDoctors = rankProfilesByQuery(
+      rawAvailableDoctors,
+      meaningfulTokens,
+      'doctor',
+      DOCTOR_KEYWORDS
+    );
+
+    // Check if the user asked for a specific doctor/clinic/hospital name that isn't in rankedDoctors
+    const normDocKwSet = new Set<string>();
+    DOCTOR_KEYWORDS.forEach((kw) => {
+      const n = normalizeSearchString(kw);
+      if (n) {
+        normDocKwSet.add(n);
+        n.split(/\s+/).forEach((w) => normDocKwSet.add(w));
+      }
+    });
+    const specificDocIds = extractSpecificQueryIdentifiers(meaningfulTokens.join(' ')).filter(
+      (idTok) => !normDocKwSet.has(idTok)
+    );
+
+    const matchedHospitals =
+      specificDocIds.length > 0
+        ? dataset.hospitals.filter((h) => {
+            const hText = normalizeSearchString(
+              `${h.name} ${h.doctorInCharge || ''} ${h.address} ${h.categoryUrdu || ''}`
+            );
+            return specificDocIds.some((idTok) =>
+              expandSynonyms(idTok).some((syn) => hText.includes(syn))
+            );
+          })
+        : dataset.hospitals.slice(0, 2);
+
+    // If the user asked for a specific named doctor/clinic that does NOT exist in the portal:
+    // NEVER substitute another doctor's profile!
+    if (specificDocIds.length > 0 && rankedDoctors.length === 0 && matchedHospitals.length === 0) {
+      const notAvailHeader = `معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں (مجھے معلوم نہیں)۔`;
+      return {
+        intent: 'not_found',
+        displayText: notAvailHeader,
+        spokenText: notAvailHeader,
+        phoneNumbers: [],
+        matchedItems: [],
+        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+      };
+    }
+
+    const phones: PhoneContactItem[] = [];
+    const matchedItems: VoiceMatchedItem[] = [];
+    const displayParts: string[] = [];
+    const spokenParts: string[] = [];
+    let staleness: string | undefined;
+
+    rankedDoctors.forEach((doc) => {
+      const st = getStalenessNotice(doc.createdAt, nowMs);
+      if (st && !staleness) staleness = st;
+
+      const hours =
+        doc.openingTime && doc.closingTime ? ` (اوقات: ${doc.openingTime} تا ${doc.closingTime})` : '';
+      displayParts.push(
+        `🩺 ${doc.name} (${doc.businessName}) ${doc.address} میں ہیں۔ آج موجود ہیں${hours}۔ فون نمبر: ${doc.mobile}۔`
+      );
+      spokenParts.push(
+        `${doc.name}، ${doc.businessName}، ${doc.address} میں ہیں۔ آج موجود ہیں${hours}۔ فون نمبر: ${formatPhoneDigitsForSpeech(
+          doc.mobile,
+          lang
+        )}۔`
+      );
+      phones.push({
+        label: `${doc.name} (${doc.businessName})`,
+        phone: doc.mobile,
+        sublabel: doc.address,
+      });
+      matchedItems.push({
+        id: doc.id,
+        title: `${doc.name} (${doc.businessName})`,
+        categoryLabel: 'ڈاکٹر و کلینک (آج موجود)',
+        area: doc.address,
+        phone: doc.mobile,
+      });
+    });
+
+    matchedHospitals.forEach((h) => {
+      const st = getStalenessNotice(h.lastUpdated, nowMs);
+      if (st && !staleness) staleness = st;
+
+      displayParts.push(
+        `🏥 ${h.name} (${h.address}): ${h.timing}۔ فون نمبر: ${h.contact}۔`
+      );
+      spokenParts.push(
+        `${h.name}، ${h.address}۔ ${h.timing}۔ فون نمبر: ${formatPhoneDigitsForSpeech(
+          h.contact,
+          lang
+        )}۔`
+      );
+      if (h.contact) {
+        phones.push({
+          label: h.name,
+          phone: h.contact,
+          sublabel: h.timing,
+        });
+      }
+      matchedItems.push({
+        id: h.id,
+        title: h.name,
+        categoryLabel: h.categoryUrdu || 'ہسپتال و ایمرجنسی',
+        area: h.address,
+        phone: h.contact,
+      });
+    });
+
+    if (displayParts.length === 0) {
+      const msg =
+        'اس وقت کوئی ڈاکٹر آج دستیاب فہرست میں موجود نہیں ہے۔ ایمرجنسی کے لیے 1122 پر کال کریں۔';
+      return {
+        intent: 'doctor',
+        displayText: msg,
+        spokenText: 'اس وقت کوئی ڈاکٹر آج دستیاب نہیں ہے۔ ایمرجنسی کے لیے ایک ایک دو دو پر کال کریں۔',
+        phoneNumbers: [{ label: 'ریسکیو 1122', phone: '1122', sublabel: 'ایمرجنسی' }],
+        matchedItems: [],
+        exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+      };
+    }
+
+    const displayText = displayParts.join('\n') + (staleness ? `\n(${staleness})` : '');
+    const spokenText = spokenParts.join(' ') + (staleness ? ` ${staleness}` : '');
+
+    return {
+      intent: 'doctor',
+      displayText,
+      spokenText,
+      phoneNumbers: phones,
+      matchedItems,
+      stalenessNotice: staleness,
+      exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+    };
+  }
+
   // 9. Check Specific Worker / Shop Categories (Rank exact name & category first, then area)
   for (const catEntry of WORKER_CATEGORY_MAP) {
     if (containsAny(normQuery, rawLower, catEntry.terms)) {
@@ -1960,11 +2437,38 @@ export function answerVoiceQuestion(
       const matchingWorkers = rankProfilesByQuery(
         rawMatchingWorkers,
         meaningfulTokens,
-        catEntry.category
+        catEntry.category,
+        catEntry.terms
       );
 
       if (matchingWorkers.length === 0) {
-        const msg = `معاف کریں، اس وقت کوئی ${catEntry.labelUrdu} آج دستیاب نہیں ہے۔`;
+        // Check if user asked for a specific person/shop name that doesn't exist in this category
+        const normCatTermsSet = new Set<string>();
+        catEntry.terms.forEach((t) => {
+          const nt = normalizeSearchString(t);
+          if (nt) {
+            normCatTermsSet.add(nt);
+            nt.split(/\s+/).forEach((w) => normCatTermsSet.add(w));
+          }
+        });
+        const specificWorkerIds = extractSpecificQueryIdentifiers(
+          meaningfulTokens.join(' ')
+        ).filter((idTok) => !normCatTermsSet.has(idTok));
+
+        if (specificWorkerIds.length > 0) {
+          // NEVER substitute another person's profile when a requested person is not found!
+          const notAvailMsg = `معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں (مجھے معلوم نہیں)۔`;
+          return {
+            intent: 'not_found',
+            displayText: notAvailMsg,
+            spokenText: notAvailMsg,
+            phoneNumbers: [],
+            matchedItems: [],
+            exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,
+          };
+        }
+
+        const msg = `معاف کریں، اس وقت کوئی ${catEntry.labelUrdu} آج دستیاب نہیں ہے۔ (معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں)۔`;
         return {
           intent: 'worker',
           displayText: msg,
@@ -1990,7 +2494,7 @@ export function answerVoiceQuestion(
           `✅ ${w.name} (${w.businessName}) ${w.address} میں ہیں۔ آج دستیاب ہیں${charges}۔ فون نمبر: ${w.mobile}۔`
         );
         spokenParts.push(
-          `${w.name}، ${w.businessName}، ${w.address} میں ہیں۔ آج دستیاب ہیں۔ فون نمبر: ${formatPhoneDigitsForSpeech(
+          `${w.name}، ${w.businessName}، ${w.address} میں ہیں۔ آج دستیاب ہیں${charges}۔ فون نمبر: ${formatPhoneDigitsForSpeech(
             w.mobile,
             lang
           )}۔`
@@ -2179,7 +2683,7 @@ export function answerVoiceQuestion(
     return {
       intent: topMatches[0]?.type === 'portal_action' ? 'portal_action' : 'worker',
       displayText: displayParts.join('\n') + (staleness ? `\n(${staleness})` : ''),
-      spokenText: (spokenParts[0] || '') + (staleness ? ` ${staleness}` : ''),
+      spokenText: spokenParts.join(' ') + (staleness ? ` ${staleness}` : ''),
       phoneNumbers: phones,
       matchedItems,
       stalenessNotice: staleness,
@@ -2187,12 +2691,13 @@ export function answerVoiceQuestion(
     };
   }
 
-  // 12. Nothing found — Say "مجھے معلوم نہیں" and show the example buttons. Never invent a number, time, or person!
-  const notFoundMsg = 'معاف کریں، مجھے معلوم نہیں۔ براہ کرم نیچے دیے گئے مثال والے بٹن دبائیں۔';
+  // 12. Nothing found — Strictly state that the information is not available on the portal ("معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں / مجھے معلوم نہیں") and never invent details!
+  const notFoundMsg =
+    'معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں (معاف کریں، مجھے معلوم نہیں)۔ براہ کرم نیچے دیے گئے مثال والے بٹن دبائیں۔';
   return {
     intent: 'not_found',
     displayText: notFoundMsg,
-    spokenText: 'معاف کریں، مجھے معلوم نہیں۔',
+    spokenText: 'معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں، مجھے معلوم نہیں۔',
     phoneNumbers: [],
     matchedItems: [],
     exampleButtons: DEFAULT_EXAMPLE_QUESTIONS,

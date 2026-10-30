@@ -568,12 +568,16 @@ export async function ensureInitialFirestoreSeed(seedData: {
   hasSeededInitialCollections = true;
 
   try {
-    // 1. Check and seed profiles if empty
+    // 1. Check and seed profiles if empty or missing any default initialProfiles
     const profilesSnap = await getDocs(collection(db, 'profiles'));
-    if (profilesSnap.empty && seedData.profiles.length > 0) {
+    const existingProfileIds = new Set<string>();
+    profilesSnap.forEach((docSnap) => existingProfileIds.add(docSnap.id));
+    if (seedData.profiles.length > 0) {
       for (const p of seedData.profiles) {
-        const clean = stripUndefined(sanitizePublicProfile(p));
-        await setDoc(doc(db, 'profiles', clean.id), clean, { merge: true });
+        if (!existingProfileIds.has(p.id)) {
+          const clean = stripUndefined(sanitizePublicProfile(p));
+          await setDoc(doc(db, 'profiles', clean.id), clean, { merge: true });
+        }
       }
     }
 

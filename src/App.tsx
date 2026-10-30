@@ -231,7 +231,12 @@ export default function App() {
       const saved = localStorage.getItem(STORAGE_PROFILES_KEY);
       if (saved) {
         const loaded: VillageProfile[] = JSON.parse(saved);
-        return sanitizePublicProfileList(loaded);
+        const existingIds = new Set(loaded.map((p) => p.id));
+        const merged = [
+          ...loaded,
+          ...initialProfiles.filter((ip) => !existingIds.has(ip.id)),
+        ];
+        return sanitizePublicProfileList(merged);
       }
     } catch (e) {
       console.warn('Failed to load profiles:', e);
@@ -492,7 +497,14 @@ export default function App() {
     }).catch(() => {});
 
     const unsubProfiles = subscribeProfiles((list) => {
-      if (list && list.length > 0) setProfiles(sanitizePublicProfileList(list));
+      if (list && list.length > 0) {
+        const existingIds = new Set(list.map((p) => p.id));
+        const merged = [
+          ...list,
+          ...initialProfiles.filter((ip) => !existingIds.has(ip.id)),
+        ];
+        setProfiles(sanitizePublicProfileList(merged));
+      }
     });
     const unsubMessages = subscribeMessages((list) => {
       if (list) setMessages(list);
@@ -2710,15 +2722,6 @@ export default function App() {
     }
   };
 
-  // Contributors who helped build the portal
-  const contributors = [
-    { name: 'عاطف رفیق (Atif Rafeeq)' },
-    { name: 'حامد محبوب (Hamid Mehboob)' },
-    { name: 'محمد عباس (Muhammad Abbas)' },
-    { name: 'سر ندیم (Sir Nadeem)' },
-    { name: 'یاسر محمود (Yasir Mehmood)' },
-    { name: 'موسٰی (MuSa)' },
-  ];
 
   // Card render helpers for universal search isolation and regular list
   const renderProfileCard = (profile: VillageProfile) => {
@@ -2731,10 +2734,10 @@ export default function App() {
     return (
       <div
         key={profile.id}
-        className="bg-white rounded-3xl border border-stone-200/90 shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col justify-between h-full relative"
+        className="bg-white rounded-xl sm:rounded-2xl lg:rounded-3xl border border-stone-200/90 shadow-xs sm:shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col justify-between h-full relative min-w-0"
       >
         {/* Card Media Header */}
-        <div className="relative h-36 sm:h-40 bg-stone-900 overflow-hidden shrink-0">
+        <div className="relative h-20 sm:h-32 lg:h-36 bg-stone-900 overflow-hidden shrink-0">
           {profile.businessImage ? (
             <img
               src={profile.businessImage}
@@ -2743,41 +2746,41 @@ export default function App() {
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-r from-emerald-950 via-teal-950 to-stone-900 flex items-center justify-center text-white/25">
-              <Briefcase className="w-10 h-10" />
+              <Briefcase className="w-5 h-5 sm:w-8 sm:h-8 lg:w-10 lg:h-10" />
             </div>
           )}
 
-          <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-black/35 to-black/25" />
+          <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/45 to-black/25" />
 
           {/* Notification Badge if messages arrived for this profile */}
           {profileUnread > 0 && (
-            <div className="absolute top-2.5 right-12 z-20">
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-red-600 text-white shadow-lg animate-pulse flex items-center gap-1 font-nastaliq">
-                🔔 {profileUnread} نیا پیغام
+            <div className="absolute top-1 sm:top-2.5 right-6 sm:right-12 z-20">
+              <span className="px-1 sm:px-2.5 py-0.5 rounded-full text-[7px] sm:text-[10px] font-bold bg-red-600 text-white shadow-lg animate-pulse flex items-center gap-0.5 sm:gap-1 font-nastaliq">
+                🔔 {profileUnread}
               </span>
             </div>
           )}
 
-          {/* Person Avatar & Name overlay with left-3 right-3 bounds to prevent overflow */}
-          <div className="absolute bottom-2.5 right-3 left-3 flex items-end gap-2.5 z-10 min-w-0">
-            <div className="relative shrink-0">
+          {/* Person Avatar & Name overlay with responsive sizing for 4-col mobile & desktop */}
+          <div className="absolute bottom-1 sm:bottom-2.5 right-1 sm:right-3 left-1 sm:left-3 flex flex-col sm:flex-row sm:items-end gap-0.5 sm:gap-2.5 z-10 min-w-0">
+            <div className="relative shrink-0 self-center sm:self-auto">
               <img
                 src={profile.personImage}
                 alt={profile.name}
-                className="w-14 h-14 rounded-full object-cover border-2 border-amber-400 shadow-lg bg-stone-800"
+                className="w-7 h-7 sm:w-11 sm:h-11 lg:w-14 lg:h-14 rounded-full object-cover border sm:border-2 border-amber-400 shadow bg-stone-800"
               />
               {profile.isVerified && (
-                <div className="absolute -bottom-0.5 -right-0.5 bg-amber-400 rounded-full p-0.5 shadow">
-                  <ShieldCheck className="w-3.5 h-3.5 text-stone-950 fill-amber-400" />
+                <div className="absolute -bottom-0.5 -right-0.5 bg-amber-400 rounded-full p-0.5 shadow hidden sm:block">
+                  <ShieldCheck className="w-3 h-3 lg:w-3.5 lg:h-3.5 text-stone-950 fill-amber-400" />
                 </div>
               )}
             </div>
 
-            <div className="text-white drop-shadow min-w-0 flex-1">
-              <h4 className="font-bold text-base font-nastaliq leading-relaxed text-amber-200 truncate">
+            <div className="text-white drop-shadow min-w-0 flex-1 text-center sm:text-right w-full">
+              <h4 className="font-bold text-[9px] sm:text-xs lg:text-base font-nastaliq leading-tight sm:leading-relaxed text-amber-200 truncate">
                 {profile.name}
               </h4>
-              <span className="text-xs text-stone-200 font-semibold block leading-relaxed truncate">
+              <span className="text-[7.5px] sm:text-[10px] lg:text-xs text-stone-200 font-semibold block leading-tight sm:leading-relaxed truncate">
                 {profile.businessName}
               </span>
             </div>
@@ -2786,7 +2789,7 @@ export default function App() {
           {/* Audio button on card */}
           <button
             onClick={() => handleSpeakCard(profile)}
-            className={`absolute top-2.5 right-2.5 p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer transition ${
+            className={`absolute top-1 sm:top-2.5 right-1 sm:right-2.5 p-1 sm:p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer transition ${
               activeCardAudioId === profile.id
                 ? 'bg-red-600 animate-voice-pulse'
                 : 'bg-black/50 hover:bg-black/75'
@@ -2794,25 +2797,39 @@ export default function App() {
             title="تفصیل سنیں 🔊"
           >
             {activeCardAudioId === profile.id ? (
-              <VolumeX className="w-3.5 h-3.5" />
+              <VolumeX className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
             ) : (
-              <Volume2 className="w-3.5 h-3.5" />
+              <Volume2 className="w-2.5 h-2.5 sm:w-3.5 sm:h-3.5" />
             )}
           </button>
 
           {/* Category pill */}
-          <div className="absolute top-2.5 left-2.5 z-10 max-w-[65%]">
-            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-800/90 text-white backdrop-blur shadow block truncate">
+          <div className="absolute top-1 sm:top-2.5 left-1 sm:left-2.5 z-10 max-w-[68%]">
+            <span className="px-1 sm:px-2.5 py-0.5 rounded-full text-[7px] sm:text-[10px] font-bold bg-emerald-800/90 text-white backdrop-blur shadow block truncate">
               {cats[profile.category] || profile.category}
             </span>
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-3.5 space-y-2.5 flex-1 flex flex-col justify-between min-w-0">
-          <div className="space-y-2.5 min-w-0">
+        <div className="p-1.5 sm:p-3 lg:p-3.5 space-y-1 sm:space-y-2.5 flex-1 flex flex-col justify-between min-w-0">
+          {/* Compact Mobile Info (<640px) for 4-Column Mobile Grid */}
+          <div className="flex sm:hidden flex-col gap-0.5 min-w-0 font-nastaliq">
+            <div className="flex items-center justify-center gap-1 min-w-0">
+              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${opStatus.dotClass}`} />
+              <span className="text-[7.5px] font-bold text-stone-700 truncate">
+                {opStatus.statusTextUrdu}
+              </span>
+            </div>
+            <div className="text-[7.5px] text-stone-500 text-center truncate">
+              {profile.address}
+            </div>
+          </div>
+
+          {/* Full Tablet & Desktop Details (>=640px) */}
+          <div className="hidden sm:block space-y-2.5 min-w-0">
             {/* Business Dedicated Operating Hours, Break & Live Status Badge */}
-            <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
+            <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2 lg:p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
               <div className="flex items-center justify-between gap-1.5 flex-wrap">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${opStatus.dotClass}`} />
@@ -2830,12 +2847,12 @@ export default function App() {
                   <span className="text-[10px] text-stone-500 font-mono">({opStatus.statusTextEnglish})</span>
                 </div>
 
-                <span className="text-[11px] font-bold text-stone-700 bg-white px-2 py-0.5 rounded-lg border border-stone-200 font-mono shadow-2xs" dir="ltr">
+                <span className="text-[10px] lg:text-[11px] font-bold text-stone-700 bg-white px-2 py-0.5 rounded-lg border border-stone-200 font-mono shadow-2xs" dir="ltr">
                   ⏰ {opStatus.openingTime} – {opStatus.closingTime}
                 </span>
               </div>
 
-              <div className="flex items-center justify-between gap-1 text-[11px] text-stone-600 pt-1 border-t border-stone-200/60 flex-wrap">
+              <div className="flex items-center justify-between gap-1 text-[10px] lg:text-[11px] text-stone-600 pt-1 border-t border-stone-200/60 flex-wrap">
                 <span className="flex items-center gap-1">
                   <Clock className="w-3 h-3 text-amber-600 shrink-0" />
                   <span>دوپہر وقفہ / لنچ بریک:</span>
@@ -2863,8 +2880,37 @@ export default function App() {
             </div>
           </div>
 
-          {/* Action buttons: Mobile thumb-friendly */}
-          <div className="space-y-1.5 pt-1 font-nastaliq">
+          {/* Compact Action buttons on Mobile (<640px) so 4 columns fit without overflow */}
+          <div className="grid grid-cols-2 gap-1 pt-0.5 sm:hidden font-nastaliq">
+            {profile.mobile ? (
+              <a
+                href={`tel:${profile.mobile}`}
+                className="min-h-[26px] py-1 px-1 rounded-lg bg-emerald-700 text-white font-bold text-[8px] flex items-center justify-center gap-0.5 shadow-2xs transition active:scale-95 truncate"
+              >
+                <Phone className="w-2.5 h-2.5 shrink-0" />
+                <span className="truncate">کال</span>
+              </a>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSelectedProfile(profile)}
+                className="min-h-[26px] py-1 px-1 rounded-lg bg-stone-200 text-stone-700 font-bold text-[8px] flex items-center justify-center truncate"
+              >
+                <span>پروفائل</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSelectedProfile(profile)}
+              className="min-h-[26px] py-1 px-1 rounded-lg bg-stone-100 text-stone-800 font-bold text-[8px] border border-stone-200 flex items-center justify-center gap-0.5 transition cursor-pointer truncate"
+            >
+              <Eye className="w-2.5 h-2.5 text-stone-600 shrink-0" />
+              <span className="truncate">تفصیل</span>
+            </button>
+          </div>
+
+          {/* Full Action buttons on Tablet & Desktop (>=640px) */}
+          <div className="hidden sm:block space-y-1.5 pt-1 font-nastaliq">
             <div className="grid grid-cols-3 gap-1.5">
               <a
                 href={`tel:${profile.mobile}`}
@@ -3696,13 +3742,21 @@ export default function App() {
                           searchAssistantAnswer.spokenText,
                           lang === 'en' ? 'en' : 'ur',
                           undefined,
-                          { isFemaleVillageVoice: false, voiceGender: 'male', rate: 0.65, pitch: 1.0 }
+                          { isFemaleVillageVoice: false, voiceGender: 'male', rate: 0.72, pitch: 1.0 }
                         );
                       }}
                       className="min-h-[44px] px-3 py-1.5 rounded-xl bg-amber-400 hover:bg-amber-500 text-stone-950 text-xs font-bold flex items-center gap-1 shadow cursor-pointer"
                     >
                       <Volume2 className="w-4 h-4" />
                       <span>آہستہ سنیں</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => stopSpeaking()}
+                      className="min-h-[44px] px-3 py-1.5 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1 shadow cursor-pointer"
+                    >
+                      <VolumeX className="w-4 h-4" />
+                      <span>آواز روکیں</span>
                     </button>
                   </div>
                 </div>
@@ -3770,9 +3824,49 @@ export default function App() {
                   </div>
                 )}
 
+                {/* Clarification Buttons when multiple people share similar names */}
+                {searchAssistantAnswer.needsClarification &&
+                  searchAssistantAnswer.clarificationOptions &&
+                  searchAssistantAnswer.clarificationOptions.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-amber-300">
+                      <span className="text-xs sm:text-sm font-bold text-amber-950 block">
+                        براہ کرم مطلوبہ شخص منتخب کریں:
+                      </span>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {searchAssistantAnswer.clarificationOptions.map((personName) => (
+                          <button
+                            key={personName}
+                            type="button"
+                            onClick={() => {
+                              setSearchQuery(personName);
+                              const ans = answerVoiceQuestion(
+                                personName,
+                                {
+                                  profiles,
+                                  mosques,
+                                  institutes,
+                                  transports,
+                                  hospitals,
+                                  newsEvents,
+                                  announcements,
+                                },
+                                lang
+                              );
+                              speakText(ans.spokenText, lang === 'en' ? 'en' : 'ur');
+                            }}
+                            className="min-h-[48px] px-4 py-2 rounded-2xl bg-amber-100 hover:bg-amber-200 text-stone-950 font-bold text-sm sm:text-base border-2 border-amber-400 flex items-center justify-between gap-2 cursor-pointer transition"
+                          >
+                            <span>👤 {personName}</span>
+                            <ArrowRight className="w-4 h-4 text-amber-900 shrink-0" />
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                 {/* Example Buttons when nothing matches or unclear */}
                 {(searchAssistantAnswer.intent === 'not_found' ||
-                  searchAssistantAnswer.intent === 'unclear') && (
+                  (searchAssistantAnswer.intent === 'unclear' && !searchAssistantAnswer.needsClarification)) && (
                   <div className="space-y-2 pt-2 border-t border-emerald-200">
                     <span className="text-xs font-bold text-stone-700 block">
                       مثال والے بٹن دبا کر پوچھیں:
@@ -4046,6 +4140,62 @@ export default function App() {
                 ))}
               </div>
             )}
+            {/* EXPLICIT EMPTY SEARCH STATE WHEN NO RELEVANT RESULTS ARE FOUND */}
+            {universalSearchResults.length === 0 && (
+              <div className="bg-white rounded-3xl p-6 sm:p-8 text-center border-2 border-dashed border-amber-400 shadow-md space-y-4 font-nastaliq">
+                <div className="w-14 h-14 rounded-2xl bg-amber-100 text-amber-800 flex items-center justify-center mx-auto border border-amber-300">
+                  <Search className="w-7 h-7" />
+                </div>
+                <div className="space-y-1.5">
+                  <h3 className="text-lg sm:text-xl font-extrabold text-stone-900">
+                    کوئی میچنگ رزلٹ نہیں ملا (Koi matching result nahi mila)
+                  </h3>
+                  <p className="text-xs sm:text-sm text-stone-600 font-bold leading-relaxed max-w-xl mx-auto">
+                    معذرت، "{searchQuery}" کے متعلق یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں۔ براہ کرم املا چیک کریں یا نیچے دیے گئے بٹن دبا کر تلاش کریں:
+                  </p>
+                </div>
+
+                <div className="quick-search-container flex flex-wrap items-center justify-center gap-2 pt-1">
+                  {['ڈاکٹر', 'الیکٹریشن', 'مستری', 'ٹریکٹر', 'کریانہ', 'مسجد', 'سکول', 'جھنگ وین', 'منڈی ریٹ'].map(
+                    (sampleTag) => (
+                      <button
+                        key={sampleTag}
+                        type="button"
+                        onClick={() => setSearchQuery(sampleTag)}
+                        className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-700 hover:text-white text-emerald-950 border border-emerald-300 text-xs font-bold transition cursor-pointer"
+                      >
+                        🔍 {sampleTag}
+                      </button>
+                    )
+                  )}
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      stopSpeaking();
+                      setSearchQuery('');
+                    }}
+                    className="min-h-[44px] px-4 py-2 rounded-2xl bg-stone-800 hover:bg-stone-900 text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow cursor-pointer transition"
+                  >
+                    <RefreshCw className="w-4 h-4 text-amber-300" />
+                    <span>تلاش صاف کریں (واپس ہوم پیج)</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setRegisterDefaultTab('profile');
+                      setIsRegisterModalOpen(true);
+                    }}
+                    className="min-h-[44px] px-4 py-2 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs sm:text-sm font-bold flex items-center gap-1.5 shadow cursor-pointer transition"
+                  >
+                    <PlusCircle className="w-4 h-4 text-amber-300" />
+                    <span>+ نیا کاروبار / نمبر شامل کریں</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           /* ========================================================================= */
@@ -4070,6 +4220,12 @@ export default function App() {
               hospitals={hospitals}
               newsEvents={newsEvents}
               announcements={announcements}
+              helpNotices={helpNotices}
+              mandiRates={mandiRates}
+              shelters={shelters}
+              helpGuides={helpGuides}
+              customKeywords={customKeywords}
+              floodAlertStatus={floodAlertStatus}
               signedInUser={
                 activeUserSession
                   ? {
@@ -4084,6 +4240,7 @@ export default function App() {
               }
               userMessages={activeUserSession ? messages : []}
               initialLang={lang}
+              onApplyToSearchBar={(q) => setSearchQuery(q)}
             />
 
             {/* User Personal Mobile Number Setup & Messages Widget */}
@@ -4430,7 +4587,7 @@ export default function App() {
 
             {/* Profiles Count Header */}
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-stone-600 font-bold px-1 mb-2.5 font-nastaliq">
-              <span>رتہ کلاں کاریگر و دکانیں ({filteredProfiles.length})</span>
+              <span>رتہ کلاں کاریگر و دکانیں ({Math.min(filteredProfiles.length, 16)})</span>
               <button
                 onClick={() => setIsTermsModalOpen(true)}
                 className="text-red-700 hover:underline flex items-center gap-1 font-semibold cursor-pointer"
@@ -4439,7 +4596,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* Profiles Cards List */}
+            {/* Profiles Cards List (4x4 Responsive Grid — 16 Visible Profiles) */}
             {filteredProfiles.length === 0 ? (
               <div className="bg-white rounded-3xl p-8 text-center border-2 border-dashed border-stone-300 space-y-3 my-4">
                 <Search className="w-10 h-10 text-stone-400 mx-auto" />
@@ -4460,8 +4617,8 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
-                {filteredProfiles.map((profile) => renderProfileCard(profile))}
+              <div className="profiles-grid-4x4 gap-1.5 sm:gap-3 lg:gap-4 items-stretch w-full">
+                {filteredProfiles.slice(0, 16).map((profile) => renderProfileCard(profile))}
               </div>
             )}
 
@@ -4473,265 +4630,86 @@ export default function App() {
         )}
 
         {/* ========================================================================= */}
-        {/* FOOTER: EMERGENCY DIRECTORY, HELPLINE, & CONTRIBUTORS ACKNOWLEDGMENTS */}
+        {/* COMPACT FOOTER: HELPLINE & COMPACT LEGAL LINKS                            */}
         {/* ========================================================================= */}
-        <footer className="mt-8 bg-stone-900 text-stone-300 rounded-3xl p-4 sm:p-6 border-t-4 border-amber-500 shadow-2xl space-y-5 text-xs">
-          {/* 1. DEDICATED HOSPITALS & EMERGENCY MEDICAL SERVICES SECTION (MOVED TO FOOTER ONLY) */}
-          <div className="bg-gradient-to-br from-red-950 via-rose-950 to-stone-950 border-2 border-red-500/80 rounded-3xl p-4 sm:p-5 shadow-xl text-white relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-44 h-44 bg-red-600/15 rounded-full blur-3xl pointer-events-none" />
-
-            {/* Section Header */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 relative z-10">
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div className="w-10 h-10 rounded-2xl bg-red-600 text-white flex items-center justify-center font-bold shadow-md animate-pulse shrink-0">
-                  <HeartPulse className="w-6 h-6" />
+        <footer className="mt-4 bg-stone-900 text-stone-300 rounded-2xl p-3 sm:p-4 border-t-2 border-amber-500 shadow-xl space-y-2.5 text-xs">
+          {/* Compact Admin & Helpline Bar */}
+          <div className="bg-stone-950/90 border border-amber-400/60 rounded-xl p-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-nastaliq">
+            <div className="flex items-center justify-between sm:justify-start gap-2 min-w-0">
+              <div className="flex items-center gap-2 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-amber-400 text-stone-950 flex items-center justify-center font-bold shrink-0">
+                  <ShieldCheck className="w-4 h-4 text-emerald-950" />
                 </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-base sm:text-lg font-nastaliq text-red-100">
-                      🚨 ہسپتال اور ایمرجنسی طبی خدمات
-                    </h3>
-                    <span className="bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full animate-pulse">
-                      24/7 الرٹ
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-red-200 font-nastaliq leading-relaxed">
-                    ریسکیو 1122، ڈی ایچ کیو ہسپتال جھنگ، رورل ہیلتھ سینٹر (RHC) و ادویات
-                  </p>
-                </div>
+                <span className="font-bold text-xs sm:text-sm text-amber-300 truncate">
+                  مرکزی انتظامیہ و ہیلپ لائن
+                </span>
               </div>
 
-              <button
-                onClick={() => setIsHospitalsModalOpen(true)}
-                className="px-3.5 py-2 bg-red-700 hover:bg-red-600 text-white font-bold rounded-xl text-xs font-nastaliq shadow transition active:scale-95 whitespace-nowrap shrink-0 cursor-pointer self-end sm:self-center min-h-[38px]"
-              >
-                تمام ہسپتال دیکھیں ({hospitals.length}) ➔
-              </button>
-            </div>
-
-            {/* Direct 1-Tap Emergency Calling Ribbon */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3 relative z-10">
-              <a
-                href="tel:1122"
-                className="bg-red-600 hover:bg-red-500 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-red-400 min-h-[44px]"
-              >
-                <PhoneCall className="w-4 h-4 animate-bounce shrink-0" />
-                <span>ریسکیو 1122 (مفت کال)</span>
-              </a>
-
-              <a
-                href="tel:0479200234"
-                className="bg-emerald-700 hover:bg-emerald-600 text-white p-2.5 rounded-2xl flex items-center justify-center gap-2 shadow-md font-nastaliq font-bold text-xs sm:text-sm active:scale-95 transition border border-emerald-400 min-h-[44px]"
-              >
-                <PhoneCall className="w-4 h-4 animate-bounce shrink-0" />
-                <span>ڈی ایچ کیو ہسپتال جھنگ</span>
-              </a>
-            </div>
-
-            {/* Top 3 Featured Hospital Cards */}
-            <div className="space-y-2 relative z-10">
-              {hospitals.slice(0, 3).map((hosp) => {
-                const isPlaying = activeCardAudioId === hosp.id;
-                return (
-                  <div
-                    key={hosp.id}
-                    className={`bg-white/10 backdrop-blur-md border rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 transition ${
-                      isPlaying
-                        ? 'border-amber-400 bg-white/20 ring-2 ring-amber-300'
-                        : 'border-white/15 hover:border-red-400/50'
-                    }`}
-                  >
-                    <div className="space-y-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-bold text-sm text-white font-nastaliq">
-                          {hosp.name}
-                        </span>
-                        <span className="text-[10px] bg-red-500/80 text-white px-2 py-0.5 rounded-full font-bold">
-                          {hosp.categoryUrdu}
-                        </span>
-                        {hosp.is24Hours && (
-                          <span className="text-[10px] bg-emerald-500/80 text-white px-2 py-0.5 rounded-full font-bold">
-                            24 گھنٹے
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-[11px] text-stone-300 flex items-center gap-3 flex-wrap">
-                        <span className="flex items-center gap-1">
-                          <MapPin className="w-3 h-3 text-red-400 shrink-0" />
-                          {hosp.distance}
-                        </span>
-                        <span className="flex items-center gap-1">
-                          <Clock className="w-3 h-3 text-emerald-400 shrink-0" />
-                          {hosp.timing}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-2 self-end sm:self-center shrink-0">
-                      <button
-                        onClick={() => handleSpeakHospital(hosp)}
-                        className={`px-2.5 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1 transition cursor-pointer min-h-[36px] ${
-                          isPlaying
-                            ? 'bg-amber-400 text-stone-950 animate-pulse font-bold'
-                            : 'bg-white/20 hover:bg-white/30 text-white'
-                        }`}
-                        title="آواز سنیں 🔊"
-                      >
-                        {isPlaying ? <VolumeX className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5 text-amber-300" />}
-                        <span className="font-nastaliq text-[11px]">سنیں 🔊</span>
-                      </button>
-
-                      <a
-                        href={`tel:${hosp.contact.replace(/\D/g, '')}`}
-                        className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs flex items-center gap-1 shadow font-nastaliq active:scale-95 transition min-h-[36px]"
-                      >
-                        <Phone className="w-3 h-3 shrink-0" />
-                        <span dir="ltr">{hosp.contact}</span>
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* 2. Executive Super Admin & Official Helpline Section */}
-          <div className="bg-gradient-to-r from-stone-950 via-emerald-950 to-stone-950 border-2 border-amber-400/80 rounded-2xl p-4 shadow-lg space-y-3 font-nastaliq">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-800 pb-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center font-bold shadow shrink-0">
-                  <ShieldCheck className="w-7 h-7 text-emerald-950" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <h3 className="font-bold text-base sm:text-lg text-amber-300 leading-relaxed">
-                      مرکزی انتظامیہ رتہ کلاں پورٹل
-                    </h3>
-                    <span className="bg-amber-400 text-stone-950 text-[10px] font-bold px-2 py-0.5 rounded-full font-sans">
-                      نگرانِ اعلیٰ
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-stone-400 mt-0.5">
-                    رتہ کلاں، تحصیل و ضلع جھنگ، پنجاب — تمام اختیارات و نگرانِ اعلیٰ
-                  </p>
-                </div>
-              </div>
-
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  onClick={() => {
-                    setIsAdminSupervisionRoute(true);
-                    if (typeof window !== 'undefined') {
-                      window.location.hash = '#admin';
-                    }
-                  }}
-                  className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5 min-h-[38px]"
-                >
-                  <ShieldCheck className="w-4 h-4 shrink-0" />
-                  <span>ایڈمن ای میل لاگ ان و پاس ورڈ ریکوری</span>
-                </button>
-                <button
-                  onClick={() => setIsAdminModalOpen(true)}
-                  className="bg-emerald-700 hover:bg-emerald-600 text-white px-3.5 py-2 rounded-xl font-bold text-xs transition shadow cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1.5 border border-emerald-500 min-h-[38px]"
-                >
-                  <Lock className="w-3.5 h-3.5 shrink-0" />
-                  <span>فوری ایڈمن پینل</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Official Helpline Action Button */}
-            <div className="pt-1">
               <a
                 href="tel:03270019099"
-                className="p-3 bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-500 hover:to-rose-600 text-white rounded-2xl flex items-center justify-between gap-2 text-xs font-bold transition shadow-md active:scale-98 cursor-pointer font-sans min-h-[52px]"
+                className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white rounded-lg flex items-center gap-1.5 text-[11px] font-bold transition shadow-xs shrink-0"
                 title="آفیشل ہیلپ لائن رتہ کلاں جھنگ"
               >
-                <div className="flex items-center gap-2 min-w-0">
-                  <div className="p-1.5 bg-white/20 rounded-xl shrink-0">
-                    <PhoneCall className="w-4 h-4 text-amber-200 animate-pulse" />
-                  </div>
-                  <div className="text-right min-w-0">
-                    <span className="font-nastaliq text-[11px] text-red-100 block">مرکزی رابطہ و شکایت:</span>
-                    <span className="font-nastaliq text-xs">آفیشل ہیلپ لائن</span>
-                  </div>
-                </div>
-                <span className="font-mono text-sm sm:text-base font-extrabold tracking-wider bg-black/30 px-2.5 py-1 rounded-xl shrink-0" dir="ltr">
+                <PhoneCall className="w-3 h-3 text-amber-200 shrink-0" />
+                <span className="font-mono font-extrabold tracking-wide" dir="ltr">
                   0327-0019099
                 </span>
               </a>
             </div>
-          </div>
 
-          {/* 3. Official Village Facebook Page Button */}
-          <div>
-            <a
-              href={facebookPageUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="w-full py-2.5 px-4 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-nastaliq min-h-[44px]"
-            >
-              <FacebookIcon className="w-4 h-4 shrink-0" />
-              <span>رتہ کلاں جھنگ آفیشل فیس بک پیج وزٹ کریں ➔</span>
-            </a>
-          </div>
-
-          {/* 4. Strict Religious Promotion Warning */}
-          <div className="bg-stone-800/90 border border-amber-500/40 p-3 rounded-2xl text-[11px] text-amber-200 leading-relaxed flex items-start gap-2 font-nastaliq">
-            <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
-            <div>
-              <strong className="block text-white font-bold mb-0.5">
-                مذہبی پروموشن سے پرہیز:
-              </strong>
-              <span>
-                پورٹل پر کسی بھی قسم کی مذہبی پروموشن، فرقہ واریت یا تفرقہ بازی سخت منع ہے۔ یہ پلیٹ فارم صرف رتہ کلاں کے تمام شہریوں کے باہمی روزگار، ہنر اور مدد کے لیے ہے۔
-              </span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <button
+                onClick={() => {
+                  setIsAdminSupervisionRoute(true);
+                  if (typeof window !== 'undefined') {
+                    window.location.hash = '#admin';
+                  }
+                }}
+                className="bg-amber-400 hover:bg-amber-300 text-stone-950 px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1"
+              >
+                <ShieldCheck className="w-3.5 h-3.5 shrink-0" />
+                <span>ایڈمن لاگ ان</span>
+              </button>
+              <button
+                onClick={() => setIsAdminModalOpen(true)}
+                className="bg-emerald-700 hover:bg-emerald-600 text-white px-2.5 py-1 rounded-lg font-bold text-[11px] transition cursor-pointer font-nastaliq shrink-0 active:scale-95 flex items-center justify-center gap-1 border border-emerald-500"
+              >
+                <Lock className="w-3 h-3 shrink-0" />
+                <span>ایڈمن پینل</span>
+              </button>
+              <a
+                href={facebookPageUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] flex items-center justify-center gap-1 transition active:scale-95 font-nastaliq shrink-0"
+              >
+                <FacebookIcon className="w-3.5 h-3.5 shrink-0" />
+                <span>فیس بک پیج</span>
+              </a>
             </div>
           </div>
 
-          {/* 5. Contributors Acknowledgment */}
-          <div className="bg-stone-800/90 p-4 rounded-2xl border border-stone-700 space-y-3 font-nastaliq">
-            <div className="flex items-center gap-2 text-amber-300 font-bold text-xs sm:text-sm">
-              <Users className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>رتہ کلاں پورٹل کے معاونین:</span>
-            </div>
-
-            <p className="text-[11px] text-stone-300 leading-relaxed">
-              جن افراد نے پورٹل بنانے، ڈیٹا اکٹھا کرنے اور ترتیب دینے میں کردار ادا کیا:
-            </p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 pt-1 font-nastaliq">
-              {contributors.map((item, idx) => (
-                <div
-                  key={idx}
-                  className="p-2.5 rounded-xl bg-emerald-950/80 border border-emerald-700/60 flex items-center justify-center text-xs shadow-xs text-center min-h-[40px]"
-                >
-                  <span className="font-bold text-emerald-200">{item.name}</span>
-                </div>
-              ))}
-            </div>
-
-            <p className="text-[10px] text-stone-400 border-t border-stone-700/60 pt-2">
-              معاونین کی مشترکہ کاوشوں سے یہ پلیٹ فارم خدمتِ خلق کے لیے بنایا گیا ہے۔
-            </p>
-          </div>
-
-          {/* 6. Dedicated Footer Page Links: "پرائیویسی پالیسی", "شرائط و ضوابط", "ایمرجنسی" */}
-          <div className="bg-stone-950/90 p-4 rounded-2xl border-2 border-amber-400/60 space-y-2.5 font-nastaliq">
-            <span className="text-xs font-bold text-amber-300 block text-center">
-              اہم صفحات (آف لائن بھی دستیاب ہیں):
+          {/* 3. Compact Community Notice */}
+          <div className="bg-stone-800/80 border border-amber-500/30 px-2.5 py-1.5 rounded-xl text-[10px] text-amber-200 flex items-center gap-1.5 font-nastaliq">
+            <AlertTriangle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+            <span className="truncate sm:whitespace-normal">
+              پورٹل پر کسی بھی قسم کی مذہبی پروموشن یا تفرقہ بازی سخت منع ہے۔ یہ پلیٹ فارم صرف رتہ کلاں کے شہریوں کے روزگار اور مدد کے لیے ہے۔
             </span>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+          </div>
+
+          {/* 4. Compact Footer Links: Privacy Policy, Terms & Emergency */}
+          <div className="bg-stone-950/80 p-2 rounded-xl border border-stone-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 font-nastaliq">
+            <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto sm:flex-1">
               <a
                 href="#privacy"
                 onClick={(e) => {
                   e.preventDefault();
                   navigateToFooterPage('privacy');
                 }}
-                className="min-h-[52px] px-4 py-3 rounded-2xl bg-emerald-800 hover:bg-emerald-700 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-emerald-500 transition active:scale-95 cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg bg-emerald-800 hover:bg-emerald-700 text-white font-bold text-[11px] flex items-center justify-center gap-1 border border-emerald-600/80 transition active:scale-95 cursor-pointer"
               >
-                <ShieldCheck className="w-5 h-5 text-amber-300 shrink-0" />
-                <span>پرائیویسی پالیسی</span>
+                <ShieldCheck className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span className="truncate">پرائیویسی پالیسی</span>
               </a>
 
               <a
@@ -4740,10 +4718,10 @@ export default function App() {
                   e.preventDefault();
                   navigateToFooterPage('terms');
                 }}
-                className="min-h-[52px] px-4 py-3 rounded-2xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-amber-300 transition active:scale-95 cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold text-[11px] flex items-center justify-center gap-1 border border-amber-300 transition active:scale-95 cursor-pointer"
               >
-                <BookOpen className="w-5 h-5 text-stone-950 shrink-0" />
-                <span>شرائط و ضوابط</span>
+                <BookOpen className="w-3.5 h-3.5 text-stone-950 shrink-0" />
+                <span className="truncate">شرائط و ضوابط</span>
               </a>
 
               <a
@@ -4752,16 +4730,16 @@ export default function App() {
                   e.preventDefault();
                   navigateToFooterPage('emergency');
                 }}
-                className="min-h-[52px] px-4 py-3 rounded-2xl bg-red-600 hover:bg-red-500 text-white font-extrabold text-sm flex items-center justify-center gap-2 shadow border border-red-400 transition active:scale-95 cursor-pointer"
+                className="px-2.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-500 text-white font-bold text-[11px] flex items-center justify-center gap-1 border border-red-400 transition active:scale-95 cursor-pointer"
               >
-                <PhoneCall className="w-5 h-5 text-amber-200 shrink-0" />
-                <span>ایمرجنسی</span>
+                <PhoneCall className="w-3.5 h-3.5 text-amber-200 shrink-0" />
+                <span className="truncate">ایمرجنسی نمبرز</span>
               </a>
             </div>
-          </div>
 
-          <div className="text-center text-[10px] text-stone-500 pt-1 font-nastaliq">
-            رتہ کلاں، جھنگ کمیونٹی پورٹل — تمام حقوق محفوظ ہیں © {new Date().getFullYear()}
+            <div className="text-center sm:text-left text-[10px] text-stone-500 shrink-0 px-1">
+              رتہ کلاں، جھنگ پورٹل © {new Date().getFullYear()}
+            </div>
           </div>
         </footer>
       </div>
@@ -5236,6 +5214,10 @@ export default function App() {
         userMessages={activeUserSession ? messages : []}
         initialLang={lang}
         initialQuestion={voiceAskInitialQuestion}
+        onApplyToSearchBar={(q) => {
+          setSearchQuery(q);
+          setIsVoiceAskModalOpen(false);
+        }}
       />
     </div>
   );

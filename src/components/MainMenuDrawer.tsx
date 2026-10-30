@@ -338,16 +338,6 @@ export const MainMenuDrawer: React.FC<MainMenuDrawerProps> = ({
             </button>
           </div>
         </div>
-
-        {/* Drawer Footer with Credits */}
-        <div className="p-3 bg-stone-950 border-t border-stone-800 text-center space-y-1 text-[11px] text-stone-400 font-nastaliq">
-          <p className="text-amber-300 font-bold">
-            بانی و سربراہ: ثمر سعید (Samar Saeed)
-          </p>
-          <p className="text-[10px] text-stone-500">
-            معاونین: عاطف رفیق، حامد محبوب، محمد عباس، سر ندیم، یاسر محمود، موسٰی
-          </p>
-        </div>
       </div>
     </div>
   );

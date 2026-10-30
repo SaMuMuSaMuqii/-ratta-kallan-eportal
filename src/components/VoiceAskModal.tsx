@@ -4,6 +4,9 @@ import {
   MicOff,
   Volume2,
   VolumeX,
+  Pause,
+  Play,
+  Square,
   PhoneCall,
   RefreshCw,
   Trash2,
@@ -33,6 +36,11 @@ import {
 import {
   speakText,
   stopSpeaking,
+  pauseSpeaking,
+  resumeSpeaking,
+  subscribeSpeechState,
+  getVoiceAvailabilityStatus,
+  normalizeVoiceTranscriptForSearch,
   VoiceRecognizer,
   isSpeechRecognitionSupported,
   unlockAudioContext,
@@ -77,6 +85,7 @@ export interface VoiceAskSharedProps {
   autoStartListen?: boolean;
   onClose?: () => void;
   isInlineHomeScreen?: boolean;
+  onApplyToSearchBar?: (query: string) => void;
 }
 
 interface VoiceAskModalProps extends VoiceAskSharedProps {
@@ -107,6 +116,7 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
   autoStartListen = false,
   onClose,
   isInlineHomeScreen = false,
+  onApplyToSearchBar,
 }) => {
   // Always start with Urdu by default
   const [selectedLang, setSelectedLang] = useState<Language>(initialLang || 'ur');
@@ -119,11 +129,34 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
   const [manualInput, setManualInput] = useState<string>('');
   const [currentAnswer, setCurrentAnswer] = useState<VoiceAskResult | null>(null);
   const [isSpeakingAnswer, setIsSpeakingAnswer] = useState(false);
+  const [isPausedAnswer, setIsPausedAnswer] = useState(false);
+  const [voiceStatusInfo, setVoiceStatusInfo] = useState(() =>
+    getVoiceAvailabilityStatus(initialLang || 'ur')
+  );
 
   // Error & Mic Test state
   const [errorBannerUrdu, setErrorBannerUrdu] = useState<string>('');
   const [micTestStatus, setMicTestStatus] = useState<'idle' | 'testing' | 'ok' | 'failed'>('idle');
   const [micTestMessage, setMicTestMessage] = useState<string>('');
+
+  useEffect(() => {
+    const unsubscribe = subscribeSpeechState((st) => {
+      setIsSpeakingAnswer(st.isPlaying);
+      setIsPausedAnswer(st.isPaused);
+    });
+    const refreshVoiceStatus = () => {
+      setVoiceStatusInfo(getVoiceAvailabilityStatus(selectedLang));
+    };
+    refreshVoiceStatus();
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      window.speechSynthesis.addEventListener('voiceschanged', refreshVoiceStatus);
+      return () => {
+        unsubscribe();
+        window.speechSynthesis.removeEventListener('voiceschanged', refreshVoiceStatus);
+      };
+    }
+    return unsubscribe;
+  }, [selectedLang]);
 
   // Recent questions stored only on phone (text only, never audio recordings)
   const [recentQuestions, setRecentQuestions] = useState<string[]>(() => {
@@ -160,57 +193,71 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
     unlockAudioContext();
     stopSpeaking();
     setIsSpeakingAnswer(true);
-    const speechRate = slowMode ? 0.65 : 0.92;
+    setIsPausedAnswer(false);
+    const speechRate = slowMode ? 0.72 : 0.94;
     speakText(
       text,
       selectedLang === 'en' ? 'en' : 'ur',
       () => {
         setIsSpeakingAnswer(false);
+        setIsPausedAnswer(false);
       },
       {
         isFemaleVillageVoice: false,
         voiceGender: 'male',
         rate: speechRate,
         pitch: 1.0,
+        onError: (msg) => {
+          setIsSpeakingAnswer(false);
+          setIsPausedAnswer(false);
+          setErrorBannerUrdu(msg);
+        },
       }
     );
   };
 
-  // Run question through the free on-phone engine
+  // Run question through the portal database search & voice engine
   const processQuestion = (questionText: string) => {
-    const cleanQ = questionText.trim();
+    const cleanQ = normalizeVoiceTranscriptForSearch(questionText);
     if (!cleanQ) return;
 
     setLiveWords(cleanQ);
+    setManualInput(cleanQ);
     setErrorBannerUrdu('');
     saveRecentQuestion(cleanQ);
 
-    const answer = answerVoiceQuestion(
-      cleanQ,
-      {
-        profiles,
-        mosques,
-        institutes,
-        transports,
-        hospitals,
-        newsEvents,
-        announcements,
-        helpNotices,
-        mandiRates,
-        shelters,
-        helpGuides,
-        customKeywords,
-        floodAlertStatus,
-        signedInUser,
-        userMessages,
-        previousResult: currentAnswer,
-      },
-      selectedLang
-    );
+    try {
+      const answer = answerVoiceQuestion(
+        cleanQ,
+        {
+          profiles,
+          mosques,
+          institutes,
+          transports,
+          hospitals,
+          newsEvents,
+          announcements,
+          helpNotices,
+          mandiRates,
+          shelters,
+          helpGuides,
+          customKeywords,
+          floodAlertStatus,
+          signedInUser,
+          userMessages,
+          previousResult: currentAnswer,
+        },
+        selectedLang
+      );
 
-    setCurrentAnswer(answer);
-    playNotificationChime('success');
-    speakAnswerAloud(answer.spokenText, false);
+      setCurrentAnswer(answer);
+      playNotificationChime('end');
+      speakAnswerAloud(answer.spokenText, false);
+    } catch {
+      setErrorBannerUrdu(
+        'ڈیٹا بیس میں معلومات تلاش کرتے وقت تکنیکی مسئلہ پیش آیا۔ براہ کرم دوبارہ کوشش کریں۔'
+      );
+    }
   };
 
   // Start / Stop listening on big microphone button tap (1 tap = immediately speaks)
@@ -266,7 +313,10 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
       },
       (err) => {
         setIsListening(false);
-        const rawCode = String(err?.error || err?.message || err || '');
+        const rawCode =
+          typeof err === 'string'
+            ? err
+            : String((err as Record<string, unknown>)?.error || (err as Record<string, unknown>)?.message || '');
 
         // If Punjabi pa-PK threw language-not-supported, inform user in Urdu and continue in Urdu
         if (rawCode.includes('language-not-supported') && selectedLang === 'pa') {
@@ -550,23 +600,65 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
         {/* ANSWER CARD + POST-ANSWER ACTION BUTTONS + CALL BUTTONS */}
         {currentAnswer && (
           <div className="bg-emerald-50/90 border-2 border-emerald-600 rounded-3xl p-3.5 sm:p-4 space-y-3.5 shadow-md">
-            <div className="flex items-center justify-between border-b border-emerald-200 pb-2">
-              <span className="text-xs sm:text-sm font-bold text-emerald-900 flex items-center gap-1.5">
-                <CheckCircle2 className="w-4 h-4 text-emerald-700" />
-                <span>رتہ کلاں پورٹل کا جواب:</span>
-              </span>
-              <div className="flex items-center gap-1.5">
-                {isSpeakingAnswer && (
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-emerald-200 pb-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="text-xs sm:text-sm font-bold text-emerald-900 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700" />
+                  <span>رتہ کلاں پورٹل کا جواب:</span>
+                </span>
+                <span
+                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${
+                    voiceStatusInfo.hasNativeUrduVoice || voiceStatusInfo.mode === 'english'
+                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                      : 'bg-amber-100 text-amber-950 border-amber-400'
+                  }`}
+                  title={voiceStatusInfo.statusMessageUrdu}
+                >
+                  🔊 {voiceStatusInfo.statusMessageUrdu}
+                </span>
+              </div>
+              <div className="flex items-center gap-1.5 flex-wrap">
+                {isSpeakingAnswer && !isPausedAnswer && (
+                  <button
+                    type="button"
+                    onClick={() => pauseSpeaking()}
+                    className="px-2.5 py-1 rounded-xl bg-amber-500 hover:bg-amber-600 text-stone-950 text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <Pause className="w-3.5 h-3.5" />
+                    <span>وقفہ (Pause)</span>
+                  </button>
+                )}
+                {isPausedAnswer && (
+                  <button
+                    type="button"
+                    onClick={() => resumeSpeaking()}
+                    className="px-2.5 py-1 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition"
+                  >
+                    <Play className="w-3.5 h-3.5" />
+                    <span>جاری رکھیں (Resume)</span>
+                  </button>
+                )}
+                {(isSpeakingAnswer || isPausedAnswer) && (
                   <button
                     type="button"
                     onClick={() => {
                       stopSpeaking();
                       setIsSpeakingAnswer(false);
+                      setIsPausedAnswer(false);
                     }}
-                    className="px-2.5 py-1 rounded-xl bg-red-600 text-white text-xs font-bold flex items-center gap-1 cursor-pointer"
+                    className="px-2.5 py-1 rounded-xl bg-red-600 hover:bg-red-700 text-white text-xs font-bold flex items-center gap-1 cursor-pointer transition"
                   >
-                    <VolumeX className="w-3.5 h-3.5" />
-                    <span>آواز روکیں</span>
+                    <Square className="w-3.5 h-3.5" />
+                    <span>آواز بند کریں (Stop)</span>
+                  </button>
+                )}
+                {onApplyToSearchBar && liveWords.trim() && (
+                  <button
+                    type="button"
+                    onClick={() => onApplyToSearchBar(liveWords.trim())}
+                    className="px-2.5 py-1 rounded-xl bg-teal-700 hover:bg-teal-800 text-white text-xs font-bold cursor-pointer transition"
+                  >
+                    🔍 سرچ بار میں دیکھیں
                   </button>
                 )}
                 <button
@@ -574,8 +666,10 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
                   onClick={() => {
                     stopSpeaking();
                     setIsSpeakingAnswer(false);
+                    setIsPausedAnswer(false);
                     setCurrentAnswer(null);
                     setLiveWords('');
+                    setManualInput('');
                   }}
                   className="px-2.5 py-1 rounded-xl bg-stone-200 hover:bg-stone-300 text-stone-800 text-xs font-bold cursor-pointer"
                 >

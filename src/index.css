@@ -347,3 +347,21 @@ svg {
 .animate-voice-pulse {
   animation: voice-pulse 1.4s infinite cubic-bezier(0.4, 0, 0.6, 1);
 }
+
+/* ============================================================================
+   4 × 4 PEOPLE PROFILES GRID (4 COLUMNS ON BOTH MOBILE AND DESKTOP)
+   ============================================================================ */
+.profiles-grid-4x4 {
+  display: grid !important;
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.profiles-grid-4x4 > * {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden;
+}
+

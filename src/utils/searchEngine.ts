@@ -28,9 +28,6 @@ import {
   sanitizePublicInstitute,
   sanitizePublicTransport,
   sanitizePublicHospital,
-  initialMandiRates,
-  initialShelters,
-  initialHelpGuides,
 } from './privacySanitizer';
 
 export interface PortalFeatureSearchItem {
@@ -510,7 +507,7 @@ export function normalizeSearchString(raw: string): string {
     .replace(/[ڑړ]/g, 'ڑ')
     .replace(/[ݨ]/g, 'ن')
     .replace(/[ڳ]/g, 'گ')
-    .replace(/[\u06D4\u060C\u061F]/g, ' ') // Urdu punctuation
+    .replace(/[\u06D4\u060C\u061F?,!.;:'"()[\]{}]/g, ' ') // Urdu & ASCII punctuation
     .toLowerCase();
 
   return str.replace(/\s+/g, ' ').trim();
@@ -549,18 +546,18 @@ export const SYNONYM_CLUSTERS: string[][] = [
   ],
   // Mistri / Mason / Construction
   [
-    'مستری', 'راج', 'مزدور', 'راج مزدور', 'تعمیر', 'مکان', 'پلستر', 'دیوار', 'بنیاد',
+    'مستری', 'میستری', 'راج', 'مزدور', 'راج مزدور', 'تعمیر', 'مکان', 'پلستر', 'دیوار', 'بنیاد',
     'mistri', 'raj', 'mazdoor', 'majdoor', 'mason', 'construction', 'builder', 'bricklayer'
   ],
   // Electrician / Wiring / Solar
   [
-    'الیکٹریشن', 'بجلی', 'بجلی والا', 'تار', 'وائرنگ', 'سولر', 'موٹر', 'پنکھا', 'یو پی ایس', 'بیٹری', 'سولر پلیٹ',
+    'الیکٹریشن', 'بجلی', 'بیجلی', 'بجلی والا', 'تار', 'وائرنگ', 'سولر', 'موٹر', 'پنکھا', 'یو پی ایس', 'بیٹری', 'سولر پلیٹ',
     'electrician', 'bijli', 'solar', 'wiring', 'motor', 'fan', 'ups', 'battery', 'inverter'
   ],
   // Doctor / Clinic / Hospital / Pharmacy
   [
-    'ڈاکٹر', 'طبیب', 'کلینک', 'ہسپتال', 'اسپتال', 'دوا', 'دوائی', 'میڈیکل', 'علاج', 'شفا', 'ایمرجنسی', 'ریسکیو', '1122',
-    'doctor', 'clinic', 'hospital', 'medical', 'medicine', 'dawa', 'dawakhana', 'cure', 'emergency', '1122', 'ambulance'
+    'ڈاکٹر', 'ڈاکدار', 'طبیب', 'کلینک', 'ہسپتال', 'اسپتال', 'دوا', 'دوائی', 'میڈیکل', 'علاج', 'شفا', 'ایمرجنسی', 'ریسکیو', '1122',
+    'doctor', 'daktar', 'clinic', 'hospital', 'medical', 'medicine', 'dawa', 'dawakhana', 'cure', 'emergency', '1122', 'ambulance'
   ],
   // Tailor / Clothes / Sewing
   [
@@ -574,13 +571,18 @@ export const SYNONYM_CLUSTERS: string[][] = [
   ],
   // Karyana / Grocery / General store
   [
-    'کریانہ', 'جنرل سٹور', 'سودا', 'سودا سلف', 'دکان', 'پرچون', 'گھی', 'چینی', 'پتی', 'صابن',
-    'karyana', 'grocery', 'general store', 'store', 'kiryana', 'kirana', 'shop', 'parchoon'
+    'کریانہ', 'جنرل سٹور', 'سودا', 'سودا سلف', 'راشن', 'دکان', 'پرچون', 'گھی', 'چینی', 'پتی', 'صابن',
+    'karyana', 'grocery', 'general store', 'store', 'kiryana', 'kirana', 'shop', 'parchoon', 'rashan', 'ration'
   ],
   // Plumber / Sanitary / Pipes
   [
-    'پلمبر', 'سینیٹری', 'پائپ', 'ٹونٹی', 'بورنگ', 'واش روم', 'پانی کا پائپ', 'نلکا',
+    'پلمبر', 'سینیٹری', 'پائپ', 'ٹونٹی', 'بورنگ', 'واش روم', 'پانی کا پائپ', 'نلکا', 'نلکے',
     'plumber', 'sanitary', 'pipe', 'boring', 'water pipe', 'tap'
+  ],
+  // Mechanic / Motorcycle / Puncture
+  [
+    'مکینک', 'موٹر سائیکل', 'بائیک', 'پنکچر', 'پنچر', 'پرزے', 'سروس سٹیشن', 'انجن', 'ٹیوننگ',
+    'mechanic', 'motorcycle', 'bike', 'puncture', 'tyre', 'tire', 'tuning'
   ],
   // Welder / Iron / Gate
   [
@@ -632,7 +634,788 @@ export const SYNONYM_CLUSTERS: string[][] = [
     'خون', 'عطیہ خون', 'بلڈ', 'بلڈ ڈونر', 'امداد', 'گمشدہ', 'نوٹس بورڈ',
     'blood', 'donor', 'help', 'lost', 'found', 'noticeboard', 'urgent aid'
   ],
+  // Halwai / Sweets / Bakery / Catering
+  [
+    'حلوائی', 'مٹھائی', 'پکوان', 'دیگ', 'بریانی', 'بیکری', 'کیک', 'سموسہ', 'پکوڑا',
+    'halwai', 'mithai', 'sweets', 'bakery', 'pakwan', 'catering', 'degh'
+  ],
+  // Seed / Fertilizer / Spray / Agro Store
+  [
+    'سپرے', 'کھاد', 'بیج', 'زرعی ادویات', 'پیسٹی سائیڈ', 'کھاد بیج',
+    'spray', 'khad', 'beej', 'seed', 'seeds', 'pesticide', 'agro'
+  ],
+  // Computer / NADRA / Online Services
+  [
+    'کمپیوٹر', 'نادرا', 'فوٹو کاپی', 'پرنٹنگ', 'بے فارم', 'احساس پروگرام', 'بے نظیر', 'آن لائن',
+    'computer', 'nadra', 'photocopy', 'printing', 'online', 'bisp', 'ehsaas'
+  ],
 ];
+
+/**
+ * Bilingual name & shop title transliterations (Roman Urdu <-> Urdu script)
+ * Used to match Roman Urdu searches for specific people/places without treating names as generic categories.
+ */
+export const NAME_TRANSLITERATION_CLUSTERS: string[][] = [
+  ['ثمر', 'samar', 'sammar'],
+  ['سعید', 'saeed', 'said'],
+  ['ارشد', 'ارشاد', 'arshad', 'irshad'],
+  ['ستار', 'عبدالستار', 'sattar', 'abdul sattar', 'abdulsattar'],
+  ['اصغر', 'asghar', 'asgar'],
+  ['طارق', 'tariq', 'tarik'],
+  ['محمود', 'mahmood', 'mehmood', 'mahmud'],
+  ['غلام', 'ghulam', 'gulam'],
+  ['رسول', 'rasool', 'rasul'],
+  ['ساجد', 'sajid', 'saajid'],
+  ['نوید', 'naveed', 'navid'],
+  ['بشیر', 'bashir', 'basheer'],
+  ['اللہ دتہ', 'دتہ', 'allah ditta', 'allahditta', 'ditta'],
+  ['رضوان', 'rizwan'],
+  ['اسلم', 'aslam'],
+  ['نعیم', 'naeem', 'naim'],
+  ['عرفان', 'irfan', 'erfan'],
+  ['فضل', 'fazal', 'fazl'],
+  ['فیاض', 'fayyaz', 'fiaz'],
+  ['اکرم', 'akram'],
+  ['شبیر', 'shabbir', 'shabir'],
+  ['ندیم', 'nadeem', 'nadim'],
+  ['عاطف', 'atif', 'aatif'],
+  ['یاسر', 'yasir', 'yasser'],
+  ['بلقیس', 'bilqees', 'bilqis'],
+  ['غفور', 'عبدالغفور', 'ghafoor', 'abdul ghafoor'],
+  ['توصیف', 'tauseef', 'toseef'],
+  ['وقاص', 'waqas', 'waqqas'],
+  ['اشرف', 'ashraf'],
+  ['شفیق', 'shafiq', 'shafique'],
+  ['رمضان', 'ramzan', 'ramazan'],
+  ['یوسف', 'yousaf', 'yousuf', 'yusuf'],
+  ['شکور', 'عبدالشکور', 'shakoor', 'shakur'],
+  ['نذیر', 'nazir', 'nazeer'],
+  ['طاہرہ', 'tahira'],
+  ['مظہر', 'mazhar'],
+  ['بلال', 'bilal'],
+  ['خالد', 'khalid'],
+  ['زاہد', 'zahid'],
+  ['شاہد', 'shahid'],
+  ['راشد', 'rashid'],
+  ['ناصر', 'nasir', 'nasser'],
+  ['کاشف', 'kashif'],
+  ['فرحان', 'farhan'],
+  ['عمران', 'imran', 'emran'],
+  ['کامران', 'kamran'],
+  ['عدنان', 'adnan'],
+  ['سلمان', 'salman'],
+  ['عثمان', 'usman', 'osman'],
+  ['حمزہ', 'hamza'],
+  ['احمد', 'ahmad', 'ahmed'],
+  ['محمد', 'muhammad', 'mohammad', 'mohammed', 'md'],
+  ['علی', 'ali'],
+  ['حسن', 'hassan', 'hasan'],
+  ['حسین', 'hussain', 'husain', 'hussein'],
+  ['شہباز', 'shahbaz', 'shehbaz', 'shabaz'],
+  ['اعجاز', 'ijaz', 'ejaz', 'aijaz'],
+  ['مشتاق', 'mushtaq', 'mustaq'],
+  ['اختر', 'akhtar', 'akhter', 'aktar'],
+  ['سلیم', 'saleem', 'salim'],
+  ['ریاض', 'riaz', 'reyaz'],
+  ['ظفر', 'zafar', 'zaffar'],
+  ['اقبال', 'iqbal'],
+  ['مختار', 'mukhtar', 'mukhtiar'],
+  ['نواز', 'حق نواز', 'nawaz', 'haq nawaz', 'haqnawaz'],
+  ['بوٹا', 'boota', 'buta'],
+  ['صادق', 'sadiq', 'saddiq'],
+  ['چراغ', 'chiragh', 'charagh'],
+  ['فتح', 'fateh', 'fatah'],
+  ['شیر', 'sher', 'shair'],
+  ['عنایت', 'inayat', 'enayat'],
+  ['سراج', 'siraj'],
+  ['اللہ یار', 'یار', 'allah yar', 'allahyar', 'yar'],
+  ['دین', 'din', 'deen'],
+  ['خان', 'khan'],
+  ['چوہدری', 'chaudhry', 'choudhry', 'chaudhary', 'ch'],
+  ['ملک', 'malik'],
+  ['میاں', 'mian', 'miyan'],
+  ['حاجی', 'haji', 'haaji'],
+  ['مہر', 'mahr', 'mehar', 'mehr'],
+  ['حکیم', 'hakeem', 'hakim'],
+  ['رانا', 'rana'],
+  ['نول', 'nol', 'noul', 'nawal'],
+  ['سیال', 'sial', 'syal'],
+  ['چدھڑ', 'chadhar', 'chaddar', 'chadher'],
+  ['بھٹی', 'bhatti', 'bhati'],
+  ['راجپوت', 'rajput', 'rajpoot'],
+  ['قریشی', 'qureshi', 'qurashi'],
+  ['جٹ', 'jutt', 'jat'],
+  ['کمہار', 'kumhar'],
+  ['لوہار', 'lohar', 'luhar'],
+  ['گجر', 'gujjar', 'gujar'],
+  ['رفیق', 'rafiq', 'rafique'],
+  ['الشفا', 'الشفاء', 'alshifa', 'al shifa', 'shifa'],
+  ['العزیز', 'alaziz', 'al aziz', 'aziz'],
+  ['القلم', 'alqalam', 'al qalam', 'qalam'],
+  ['مدینہ', 'madina', 'medina'],
+  ['قباء', 'quba'],
+  ['مرکزی', 'markazi'],
+  ['دارالسلام', 'darussalam'],
+  ['غازی', 'ghazi'],
+];
+
+/**
+ * Converts an Urdu or English/Roman word into a canonical phonetic consonant skeleton
+ * so spelling variations and Urdu <-> English transliterations of any person's name match reliably.
+ */
+export function toPhoneticSkeleton(rawWord: string): string {
+  const norm = normalizeSearchString(rawWord);
+  if (!norm) return '';
+
+  // Check if Urdu script
+  if (/[\u0600-\u06FF]/.test(norm)) {
+    const urduMap: Record<string, string> = {
+      'ب': 'b',
+      'پ': 'p',
+      'ت': 't',
+      'ٹ': 't',
+      'ث': 's',
+      'ج': 'j',
+      'چ': 'ch',
+      'ح': 'h',
+      'خ': 'kh',
+      'د': 'd',
+      'ڈ': 'd',
+      'ذ': 'z',
+      'ر': 'r',
+      'ڑ': 'r',
+      'ز': 'z',
+      'ژ': 'sh',
+      'س': 's',
+      'ش': 'sh',
+      'ص': 's',
+      'ض': 'z',
+      'ط': 't',
+      'ظ': 'z',
+      'ع': '',
+      'غ': 'g',
+      'ف': 'f',
+      'ق': 'k',
+      'ک': 'k',
+      'گ': 'g',
+      'ل': 'l',
+      'م': 'm',
+      'ن': 'n',
+      'ں': 'n',
+      'و': 'w',
+      'ہ': 'h',
+      'ی': 'y',
+      'ا': '',
+      'ء': '',
+    };
+    let out = '';
+    for (let i = 0; i < norm.length; i++) {
+      const ch = norm[i];
+      if (ch === 'و' && i > 0) {
+        // In Urdu names, non-initial و is often a long vowel (o/oo/u) except in words like نواز/نوید/نول
+        out += 'w';
+        continue;
+      }
+      if (ch === 'ی' && i > 0) {
+        // Non-initial ی is usually long vowel (ee/i/ay)
+        continue;
+      }
+      if (ch === 'ہ' && i === norm.length - 1) {
+        // Trailing ہ in Urdu functions as final 'a'/'ah' vowel
+        continue;
+      }
+      out += urduMap[ch] !== undefined ? urduMap[ch] : '';
+    }
+    return out
+      .replace(/bh/g, 'b')
+      .replace(/ph/g, 'f')
+      .replace(/th/g, 't')
+      .replace(/dh/g, 'd')
+      .replace(/rh/g, 'r')
+      .replace(/gh/g, 'g')
+      .replace(/h+/g, 'h')
+      .replace(/w/g, '');
+  }
+
+  // Latin / English / Roman Urdu phonetic skeleton
+  // Collapse doubled letters (e.g. sammar -> samar, waqqas -> waqas) BEFORE stripping vowels
+  // so consonants separated by vowels (e.g. adnan -> dnn, عدنان -> dnn) preserve both consonants.
+  let lat = norm
+    .replace(/[^a-z]/g, '')
+    .replace(/(.)\1+/g, '$1')
+    .replace(/ph/g, 'f')
+    .replace(/kh/g, 'K')
+    .replace(/sh/g, 'S')
+    .replace(/ch/g, 'C')
+    .replace(/gh/g, 'g')
+    .replace(/bh/g, 'b')
+    .replace(/dh/g, 'd')
+    .replace(/th/g, 't')
+    .replace(/rh/g, 'r')
+    .replace(/zh/g, 'S')
+    .replace(/q/g, 'k')
+    .replace(/c/g, 'k')
+    .replace(/x/g, 'ks')
+    .replace(/v/g, 'w');
+
+  // Keep initial 'y' if word starts with y, strip vowels and trailing h/w
+  const startsWithY = lat.startsWith('y');
+  lat = lat
+    .replace(/h$/g, '')
+    .replace(/[aeiouyw]/g, '')
+    .replace(/K/g, 'kh')
+    .replace(/S/g, 'sh')
+    .replace(/C/g, 'ch');
+
+  if (startsWithY && !lat.startsWith('y')) {
+    lat = 'y' + lat;
+  }
+
+  return lat;
+}
+
+/**
+ * Checks whether two name tokens (across Urdu and English/Roman or spelling variations)
+ * are phonetically or lexically equivalent.
+ */
+export function areNamesPhoneticallyEquivalent(wordA: string, wordB: string): boolean {
+  const normA = normalizeSearchString(wordA);
+  const normB = normalizeSearchString(wordB);
+  if (!normA || !normB) return false;
+  if (normA === normB) return true;
+
+  // Check explicit transliteration clusters first
+  for (const cluster of NAME_TRANSLITERATION_CLUSTERS) {
+    const normCluster = cluster.map(normalizeSearchString);
+    const hasA = normCluster.includes(normA) || normCluster.some((c) => c.split(/\s+/).includes(normA));
+    const hasB = normCluster.includes(normB) || normCluster.some((c) => c.split(/\s+/).includes(normB));
+    if (hasA && hasB) return true;
+  }
+
+  if (normA.length < 3 || normB.length < 3) return false;
+  const skelA = toPhoneticSkeleton(normA);
+  const skelB = toPhoneticSkeleton(normB);
+  if (skelA.length >= 2 && skelA === skelB) {
+    return true;
+  }
+  // Also compare without 'h' for unaspirated/aspirated variations (e.g. shehbaz / shabaz, mahmood / mamood)
+  const skelNoHA = skelA.replace(/h/g, '');
+  const skelNoHB = skelB.replace(/h/g, '');
+  if (skelNoHA.length >= 2 && skelNoHA === skelNoHB) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Conversational, location, and question stop-words that should not be treated
+ * as specific person/shop names when checking relevance.
+ */
+const GENERIC_QUERY_STOP_WORDS_RAW: string[] = [
+  'رتہ', 'کلاں', 'جھنگ', 'گاؤں', 'گاوں', 'پنڈ', 'محلہ', 'بازار', 'مین', 'روڈ', 'چوک', 'اڈا', 'اڈے', 'گلی', 'نزد', 'پاس', 'قریب', 'شرقی', 'غربی',
+  'کا', 'کی', 'کے', 'کو', 'میں', 'پر', 'سے', 'تک', 'تا', 'اور', 'یا', 'و', 'ہے', 'ہیں', 'تھا', 'ہو', 'گا', 'گی', 'گے',
+  'والا', 'والے', 'والی', 'کون', 'سا', 'سی', 'کیا', 'کہاں', 'کب', 'کتنے', 'کتنا', 'کتنی', 'کیسے', 'کس', 'کوئی', 'سب', 'تمام', 'سارے', 'لسٹ', 'فہرست',
+  'فون', 'نمبر', 'موبائل', 'رابطہ', 'کال', 'واٹس', 'ایپ', 'پتہ', 'ایڈریس', 'لوکیشن', 'جگہ',
+  'ٹائم', 'وقت', 'اوقات', 'بجے', 'صبح', 'دوپہر', 'شام', 'رات', 'آج', 'ابھی', 'کل', 'روزانہ', 'گھنٹے',
+  'کھلا', 'کھلتا', 'کھلتی', 'کھلی', 'کھولنے', 'بند', 'وقفہ', 'بریک', 'موجود', 'دستیاب', 'حاضر', 'فری', 'فوری', 'تازہ',
+  'بتائیں', 'بتاؤ', 'بتادیں', 'دیں', 'دو', 'چاہیے', 'درکار', 'تلاش', 'کریں', 'کیجیے', 'پوچھیں', 'سنیں', 'دکھائیں',
+  'بھائی', 'صاحب', 'استاد', 'کاریگر', 'ماسٹر', 'حاجی', 'چوہدری', 'ملک', 'میاں', 'قاری', 'حافظ', 'مولانا', 'مولوی', 'سر', 'باجی', 'میڈم', 'مہر', 'حکیم', 'رانا',
+  'ولد', 'ولدیت', 'والد', 'باپ', 'ابو', 'بیٹا', 'خاندان', 'فیملی', 'ذات', 'قوم', 'برادری', 'شجرہ', 'گھر',
+  'دکان', 'سٹور', 'اسٹور', 'شاپ', 'سنٹر', 'سینٹر', 'ورکس', 'ورکشاپ', 'سروس', 'سروسز', 'پوائنٹ', 'فارم', 'ہوم', 'ڈیرہ', 'یونین', 'کمیٹی',
+  'کام', 'کرنے', 'کروانا', 'کروانے', 'چلانے', 'چلانا', 'لگانے', 'لگانا', 'مرمت', 'فٹنگ', 'ٹھیک', 'خراب', 'ریٹ', 'ریٹس', 'فیس', 'چارجز', 'قیمت', 'کرایہ', 'دیہاڑی', 'معاوضہ',
+  'نیا', 'نئی', 'پرانا', 'پرانی', 'بڑا', 'بڑی', 'چھوٹا', 'اچھا', 'بہترین', 'اصلی', 'خالص', 'سرکاری', 'پرائیویٹ', 'مقامی', 'لوکل',
+  'طریقہ', 'معلومات', 'تفصیل', 'تفصیلات', 'نام', 'پروفائل', 'کارڈ', 'شامل', 'بنانے', 'لکھوانے', 'جانے', 'آنے', 'آخری', 'پہلی',
+  'دی', 'دے', 'دا', 'وچ', 'توں', 'نوں', 'لئی', 'واسطے', 'آدمی', 'بندہ', 'ہنر', 'مند',
+  'کتھے', 'کیتھے', 'کیتھی', 'کتھے', 'اے', 'ھی', 'ہن', 'دسو', 'لبھو', 'کدھر', 'کیہڑا', 'کیڑا', 'پیںڈ',
+  'ratta', 'kallan', 'jhang', 'village', 'pind', 'mohalla', 'bazaar', 'main', 'road', 'chowk', 'adda', 'near',
+  'ka', 'ki', 'ke', 'ko', 'mein', 'me', 'par', 'pe', 'se', 'tak', 'aur', 'ya', 'hai', 'hain', 'ho', 'tha',
+  'da', 'di', 'de', 'nu', 'vich', 'ton', 'daso', 'dasso', 'kithe', 'kithay', 'ethe', 'othe',
+  'wala', 'wale', 'wali', 'kon', 'kaun', 'kya', 'kia', 'kahan', 'kidhar', 'kab', 'kitna', 'kitne', 'kaise', 'kis', 'koi', 'sab', 'all', 'list',
+  'phone', 'number', 'no', 'mobile', 'contact', 'call', 'cell', 'whatsapp', 'address', 'pata', 'location', 'place', 'house', 'home',
+  'father', 'fathers', 'son', 'vald', 'walid', 'family', 'parent', 'parents', 'parentage', 'caste', 'biradri',
+  'time', 'timing', 'timings', 'hours', 'open', 'opening', 'close', 'closing', 'closed', 'break', 'available', 'availability', 'schedule', 'free', 'today', 'now',
+  'batayein', 'batao', 'dein', 'do', 'chahiye', 'need', 'want', 'find', 'search', 'tell', 'show', 'give', 'please', 'about',
+  'bhai', 'sahib', 'ustad', 'master', 'haji', 'chaudhry', 'choudhry', 'chaudhary', 'malik', 'mian', 'qari', 'hafiz', 'maulana', 'sir', 'mahr', 'mehar', 'hakeem', 'hakim', 'rana',
+  'dukan', 'shop', 'store', 'center', 'centre', 'works', 'workshop', 'service', 'services', 'point', 'farm',
+  'kaam', 'work', 'repair', 'rate', 'rates', 'price', 'fee', 'fees', 'charges', 'fare', 'kiraya', 'wage',
+  'new', 'old', 'big', 'good', 'best', 'govt', 'government', 'private', 'local', 'info', 'information', 'detail', 'details', 'name', 'profile',
+  'the', 'in', 'of', 'for', 'to', 'is', 'are', 'at', 'on', 'from', 'with', 'and', 'or', 'who', 'where', 'when', 'what', 'how', 'his', 'her', 'their'
+];
+
+const GENERIC_QUERY_STOP_WORDS = new Set<string>(
+  GENERIC_QUERY_STOP_WORDS_RAW.map(normalizeSearchString).filter(Boolean)
+);
+
+/**
+ * Honorific titles commonly used in Pakistani village person names.
+ */
+const PERSON_HONORIFIC_TITLES_RAW: string[] = [
+  'استاد', 'ماسٹر', 'حاجی', 'چوہدری', 'ملک', 'میاں', 'مہر', 'حکیم', 'رانا', 'ڈاکٹر', 'قاری', 'حافظ', 'مولانا', 'سر',
+  'ustad', 'master', 'haji', 'chaudhry', 'choudhry', 'chaudhary', 'ch', 'malik', 'mian', 'mahr', 'mehar', 'mehr', 'hakeem', 'hakim', 'rana', 'doctor', 'dr', 'qari', 'hafiz', 'maulana', 'sir',
+];
+
+const PERSON_HONORIFIC_TITLES = new Set<string>(
+  PERSON_HONORIFIC_TITLES_RAW.map(normalizeSearchString).filter(Boolean)
+);
+
+/**
+ * Checks if a query explicitly asks about a school, college, madrasa, or educational institute.
+ * Keeps general school searches strictly separate from people-profile searches.
+ */
+export function isExplicitSchoolQuery(rawQuery: string): boolean {
+  const norm = normalizeSearchString(rawQuery);
+  if (!norm) return false;
+  const schoolExplicitTerms = [
+    'سکول', 'اسکول', 'کالج', 'مدرسہ', 'تعلیم', 'تعلیمی', 'پڑھائی', 'داخلہ', 'کلاس', 'جماعت', 'ٹائم ٹیبل', 'پیریڈ', 'پرنسپل', 'ہیڈ ماسٹر', 'ہیڈ مسٹریس', 'القلم',
+    'school', 'schools', 'college', 'madrasa', 'education', 'educational', 'institute', 'academy', 'admission', 'timetable', 'headmaster', 'principal',
+  ].map(normalizeSearchString);
+
+  const queryWords = norm.split(/\s+/).filter(Boolean);
+  return schoolExplicitTerms.some((term) => {
+    if (!term) return false;
+    if (term.includes(' ')) return norm.includes(term);
+    return queryWords.includes(term);
+  });
+}
+
+/**
+ * Checks if a query explicitly asks about non-profile village entities
+ * (mosques/prayers, public transport to Jhang, hospitals/1122/shelters, mandi rates, news/announcements, how-to guides, or portal control panels).
+ */
+export function isExplicitNonProfileEntityQuery(rawQuery: string): boolean {
+  const norm = normalizeSearchString(rawQuery);
+  if (!norm) return false;
+  if (isExplicitSchoolQuery(norm)) return true;
+
+  const nonProfileTerms = [
+    // Mosque / Prayer
+    'مسجد', 'جامع مسجد', 'نماز', 'اذان', 'جمعہ', 'فجر', 'ظہر', 'عصر', 'مغرب', 'عشاء', 'مسیت', 'مولانا عبدالغفور',
+    'mosque', 'masjid', 'namaz', 'prayer', 'azan', 'jummah',
+    // Public Transport
+    'وین', 'ویگن', 'ہائی ایس', 'بس', 'گاڑی', 'گڈی', 'لاری اڈا', 'جھنگ کی وین',
+    'hiace', 'wagon', 'bus', 'transport', 'van',
+    // Hospital / Emergency / Shelter / Flood
+    'ہسپتال', 'اسپتال', 'بی ایچ یو', 'ڈسپنسری', 'مرکز صحت', 'ایمرجنسی', 'ایمبولینس', '1122', 'پناہ گاہ', 'شیلٹر', 'سیلاب',
+    'hospital', 'bhu', 'dispensary', 'emergency', 'ambulance', 'shelter', 'flood',
+    // Mandi / Crops
+    'منڈی', 'غلہ منڈی', 'منڈی ریٹ', 'گندم کا ریٹ', 'کپاس', 'چاول', 'کھاد کا ریٹ',
+    'mandi', 'crop rate', 'wheat rate',
+    // News / Help Notice / How-To / Policy / Admin
+    'خبر', 'خبریں', 'اعلان', 'اعلانات', 'کیمپ', 'گمشدہ', 'عطیہ خون', 'بلڈ ڈونر', 'پرائیویسی', 'شرائط', 'ایڈمن', 'پاس ورڈ', 'لاگ ان', 'رجسٹریشن',
+    'news', 'announcement', 'lost', 'blood', 'privacy', 'terms', 'admin', 'login', 'password', 'register', '#admin',
+  ].map(normalizeSearchString);
+
+  const queryWords = norm.split(/\s+/).filter(Boolean);
+  return nonProfileTerms.some((term) => {
+    if (!term) return false;
+    if (term.includes(' ')) return norm.includes(term);
+    return queryWords.includes(term);
+  });
+}
+
+export type PeopleRequestedField =
+  | 'phone'
+  | 'whatsapp'
+  | 'address'
+  | 'family'
+  | 'charges'
+  | 'timing'
+  | 'services'
+  | 'profile';
+
+export interface PeopleSearchAnalysis {
+  isPeopleQuery: boolean;
+  requestedFields: PeopleRequestedField[];
+  primaryField: PeopleRequestedField;
+  nameTokens: string[];
+  honorificTokens: string[];
+  categoryTokens: string[];
+  isEnglishQuery: boolean;
+}
+
+export interface PeopleDatabaseSearchResult {
+  status: 'exact' | 'multiple' | 'not_found' | 'not_people_query';
+  matchedProfiles: VillageProfile[];
+  analysis: PeopleSearchAnalysis;
+}
+
+/**
+ * Analyzes a user query to determine what person and what specific information
+ * (phone number, WhatsApp, address, family/father's name, charges, timing, services, or full profile)
+ * is being requested.
+ */
+export function analyzePeopleQuery(rawQuery: string): PeopleSearchAnalysis {
+  const norm = normalizeSearchString(rawQuery);
+  const isEnglishQuery = /[a-zA-Z]{2,}/.test(rawQuery) && !/[\u0600-\u06FF]/.test(rawQuery);
+
+  if (!norm || isExplicitNonProfileEntityQuery(rawQuery)) {
+    return {
+      isPeopleQuery: false,
+      requestedFields: ['profile'],
+      primaryField: 'profile',
+      nameTokens: [],
+      honorificTokens: [],
+      categoryTokens: [],
+      isEnglishQuery,
+    };
+  }
+
+  const words = norm.split(/\s+/).filter(Boolean);
+  const requestedFields: PeopleRequestedField[] = [];
+
+  const hasAnyWordOrPhrase = (terms: string[]): boolean => {
+    const normTerms = terms.map(normalizeSearchString);
+    return normTerms.some((t) => {
+      if (!t) return false;
+      if (t.includes(' ')) return ` ${norm} `.includes(` ${t} `);
+      return words.includes(t);
+    });
+  };
+
+  if (
+    hasAnyWordOrPhrase([
+      'ولدیت', 'والد', 'باپ', 'ابو', 'بیٹا', 'ولد', 'خاندان', 'فیملی', 'ذات', 'قوم', 'برادری', 'شجرہ',
+      'father', 'fathers', 'son of', 'vald', 'walid', 'family', 'parent', 'parents', 'parentage', 'caste', 'biradri',
+    ])
+  ) {
+    requestedFields.push('family');
+  }
+
+  if (hasAnyWordOrPhrase(['واٹس ایپ', 'واٹس', 'whatsapp'])) {
+    requestedFields.push('whatsapp');
+  }
+
+  if (
+    hasAnyWordOrPhrase([
+      'فون', 'نمبر', 'موبائل', 'رابطہ', 'کال', 'کنٹیکٹ',
+      'phone', 'number', 'mobile', 'contact', 'call', 'cell',
+    ])
+  ) {
+    requestedFields.push('phone');
+  }
+
+  if (
+    hasAnyWordOrPhrase([
+      'پتہ', 'ایڈریس', 'کہاں', 'کدھر', 'کتھے', 'کیتھے', 'مقام', 'جگہ', 'لوکیشن', 'محلہ', 'گھر',
+      'address', 'location', 'where', 'pata', 'kidhar', 'kithe', 'kithay', 'live', 'lives', 'house',
+    ])
+  ) {
+    requestedFields.push('address');
+  }
+
+  if (
+    hasAnyWordOrPhrase([
+      'ریٹ', 'ریٹس', 'فیس', 'معاوضہ', 'چارجز', 'دیہاڑی', 'قیمت', 'خرچہ',
+      'rate', 'rates', 'charges', 'fee', 'fees', 'price', 'cost', 'wage',
+    ])
+  ) {
+    requestedFields.push('charges');
+  }
+
+  if (
+    hasAnyWordOrPhrase([
+      'وقت', 'اوقات', 'ٹائم', 'کب کھلتا', 'کب بند', 'وقفہ', 'بریک',
+      'time', 'timing', 'timings', 'hours', 'schedule', 'open', 'opening', 'closing', 'break',
+    ])
+  ) {
+    requestedFields.push('timing');
+  }
+
+  if (
+    hasAnyWordOrPhrase([
+      'کیا کام', 'سروس', 'سروسز', 'خدمات', 'کاروبار', 'پیشہ', 'ہنر',
+      'services', 'service', 'business', 'profession', 'occupation', 'skills',
+    ])
+  ) {
+    requestedFields.push('services');
+  }
+
+  if (requestedFields.length === 0) {
+    requestedFields.push('profile');
+  }
+
+  const nameTokens: string[] = [];
+  const honorificTokens: string[] = [];
+  const categoryTokens: string[] = [];
+
+  for (const w of words) {
+    if (w.length < 2 || /^\d+$/.test(w)) continue;
+    if (PERSON_HONORIFIC_TITLES.has(w)) {
+      honorificTokens.push(w);
+      continue;
+    }
+    if (GENERIC_QUERY_STOP_WORDS.has(w)) {
+      continue;
+    }
+    if (isCategoryOrDomainTerm(w)) {
+      categoryTokens.push(w);
+      continue;
+    }
+    nameTokens.push(w);
+  }
+
+  // What if the user searched ONLY an honorific title that acts as part of a person's name (e.g., "چوہدری" / "Chaudhry" or "ملک" / "Malik" or "حکیم" / "Hakeem" or "رانا" / "Rana")?
+  const effectiveNameTokens =
+    nameTokens.length > 0
+      ? nameTokens
+      : categoryTokens.length === 0 && honorificTokens.length > 0
+      ? honorificTokens
+      : [];
+
+  const isPeopleQuery = effectiveNameTokens.length > 0;
+
+  return {
+    isPeopleQuery,
+    requestedFields,
+    primaryField: requestedFields[0],
+    nameTokens: effectiveNameTokens,
+    honorificTokens,
+    categoryTokens,
+    isEnglishQuery,
+  };
+}
+
+const STRICT_ROLE_HONORIFICS = new Set<string>(
+  ['ڈاکٹر', 'doctor', 'dr', 'حکیم', 'hakeem', 'hakim', 'قاری', 'qari', 'حافظ', 'hafiz', 'مولانا', 'maulana']
+    .map(normalizeSearchString)
+    .filter(Boolean)
+);
+
+/**
+ * Searches the `profiles` database for a specific person by Urdu or English name
+ * (supporting spelling variations and transliteration).
+ *
+ * Strictly enforces:
+ * - Primary matching against `profile.name` (never falsely matching another person via `fatherName` or `address` alone).
+ * - Disambiguation when multiple people share similar names (`status: 'multiple'`).
+ * - Never returning another person or school record when no match exists (`status: 'not_found'`).
+ */
+export function searchPeopleDatabase(
+  rawQuery: string,
+  profiles: VillageProfile[]
+): PeopleDatabaseSearchResult {
+  const analysis = analyzePeopleQuery(rawQuery);
+  if (!analysis.isPeopleQuery) {
+    return {
+      status: 'not_people_query',
+      matchedProfiles: [],
+      analysis,
+    };
+  }
+
+  const normFullQuery = normalizeSearchString(rawQuery);
+  const explicitlyMentionsSonOf =
+    normFullQuery.includes('ولد ') ||
+    normFullQuery.includes(' بن ') ||
+    normFullQuery.includes('son of');
+
+  const visibleProfiles = (profiles || []).filter((p) => !p.isHidden && !p.isDisabled);
+  const { nameTokens, honorificTokens, categoryTokens } = analysis;
+
+  interface ScoredCandidate {
+    profile: VillageProfile;
+    matchedCoreTokensInName: number;
+    matchedCoreTokensTotal: number;
+    matchedHonorifics: number;
+    matchedCategories: number;
+    exactFullNameMatch: boolean;
+    score: number;
+  }
+
+  const tokenMatchesWordList = (queryTok: string, targetWords: string[]): boolean => {
+    const expanded = expandSynonyms(queryTok);
+    for (const targetW of targetWords) {
+      if (!targetW) continue;
+      if (targetW === queryTok) return true;
+      if (expanded.includes(targetW)) return true;
+      if (areNamesPhoneticallyEquivalent(queryTok, targetW)) return true;
+    }
+    return false;
+  };
+
+  const candidates: ScoredCandidate[] = [];
+
+  for (const rawP of visibleProfiles) {
+    const safeP = sanitizePublicProfile(rawP);
+    const normProfileName = normalizeSearchString(safeP.name);
+    const profileNameWords = normProfileName.split(/\s+/).filter(Boolean);
+    const fatherWords = normalizeSearchString(safeP.fatherName || '')
+      .split(/\s+/)
+      .filter(Boolean);
+    // Only use businessName (NOT address/landmark) for shop/person token matching
+    const bizWords = normalizeSearchString(safeP.businessName || '')
+      .split(/\s+/)
+      .filter(Boolean);
+    const catWords = normalizeSearchString(
+      `${safeP.category || ''} ${safeP.customCategory || ''} ${(safeP.services || []).join(' ')}`
+    )
+      .split(/\s+/)
+      .filter(Boolean);
+
+    let matchedCoreTokensInName = 0;
+    let matchedCoreTokensInBizOrFather = 0;
+
+    for (const qTok of nameTokens) {
+      if (tokenMatchesWordList(qTok, profileNameWords)) {
+        matchedCoreTokensInName += 1;
+      } else if (
+        tokenMatchesWordList(qTok, bizWords) ||
+        (explicitlyMentionsSonOf && tokenMatchesWordList(qTok, fatherWords))
+      ) {
+        matchedCoreTokensInBizOrFather += 1;
+      }
+    }
+
+    // CRITICAL RULE: At least one core person name token MUST match `profile.name` itself
+    // (or all tokens match the person's `businessName` when searching by shop brand + person).
+    if (matchedCoreTokensInName === 0 && matchedCoreTokensInBizOrFather < nameTokens.length) {
+      continue;
+    }
+
+    const matchedCoreTokensTotal = matchedCoreTokensInName + matchedCoreTokensInBizOrFather;
+
+    // Every core name token in the user's query must match this person's record
+    if (matchedCoreTokensTotal < nameTokens.length) {
+      continue;
+    }
+
+    // If the user also specified a profession/category (e.g. "طارق الیکٹریشن" vs "بشیر پلمبر"),
+    // EVERY specified category token must match this person's category/services/business!
+    let matchedCategories = 0;
+    for (const cTok of categoryTokens) {
+      if (
+        tokenMatchesWordList(cTok, catWords) ||
+        tokenMatchesWordList(cTok, bizWords) ||
+        tokenMatchesWordList(cTok, profileNameWords)
+      ) {
+        matchedCategories += 1;
+      }
+    }
+    if (categoryTokens.length > 0 && matchedCategories < categoryTokens.length) {
+      continue;
+    }
+
+    let matchedHonorifics = 0;
+    let missingStrictRoleHonorific = false;
+    for (const hTok of honorificTokens) {
+      if (
+        tokenMatchesWordList(hTok, profileNameWords) ||
+        tokenMatchesWordList(hTok, bizWords) ||
+        tokenMatchesWordList(hTok, catWords)
+      ) {
+        matchedHonorifics += 1;
+      } else if (STRICT_ROLE_HONORIFICS.has(hTok)) {
+        missingStrictRoleHonorific = true;
+      }
+    }
+    if (missingStrictRoleHonorific) {
+      continue;
+    }
+
+    // Check if the query tokens match all non-honorific words of profile.name
+    const coreProfileNameWords = profileNameWords.filter((w) => !PERSON_HONORIFIC_TITLES.has(w));
+    const exactFullNameMatch =
+      coreProfileNameWords.length > 0 &&
+      coreProfileNameWords.every((pw) =>
+        nameTokens.some((qt) => tokenMatchesWordList(qt, [pw]))
+      ) &&
+      matchedCoreTokensInName === nameTokens.length;
+
+    const score =
+      matchedCoreTokensInName * 100 +
+      matchedCoreTokensInBizOrFather * 25 +
+      matchedHonorifics * 30 +
+      matchedCategories * 40 +
+      (exactFullNameMatch ? 80 : 0);
+
+    candidates.push({
+      profile: safeP,
+      matchedCoreTokensInName,
+      matchedCoreTokensTotal,
+      matchedHonorifics,
+      matchedCategories,
+      exactFullNameMatch,
+      score,
+    });
+  }
+
+  if (candidates.length === 0) {
+    return {
+      status: 'not_found',
+      matchedProfiles: [],
+      analysis,
+    };
+  }
+
+  // Sort by highest score
+  candidates.sort((a, b) => b.score - a.score);
+
+  // If multiple candidates matched all query tokens in `profile.name`:
+  const topCandidate = candidates[0];
+  const strongCompetitors = candidates.filter(
+    (c) =>
+      c.matchedCoreTokensInName === topCandidate.matchedCoreTokensInName &&
+      c.matchedHonorifics === topCandidate.matchedHonorifics &&
+      c.matchedCategories === topCandidate.matchedCategories
+  );
+
+  if (strongCompetitors.length > 1) {
+    // Check if one of them is an exact full name match (e.g. "بشیر احمد" matching "بشیر احمد" vs "بشیر احمد خان")
+    const exactFullMatches = strongCompetitors.filter((c) => c.exactFullNameMatch);
+    if (exactFullMatches.length === 1) {
+      return {
+        status: 'exact',
+        matchedProfiles: [exactFullMatches[0].profile],
+        analysis,
+      };
+    }
+
+    return {
+      status: 'multiple',
+      matchedProfiles: strongCompetitors.map((c) => c.profile),
+      analysis,
+    };
+  }
+
+  return {
+    status: 'exact',
+    matchedProfiles: [topCandidate.profile],
+    analysis,
+  };
+}
+
+/**
+ * Checks if a normalized word belongs to any domain/category/service synonym cluster.
+ */
+export function isCategoryOrDomainTerm(word: string): boolean {
+  const norm = normalizeSearchString(word);
+  if (!norm) return false;
+  if (GENERIC_QUERY_STOP_WORDS.has(norm)) return false;
+  for (const cluster of SYNONYM_CLUSTERS) {
+    const normCluster = cluster.map(normalizeSearchString);
+    if (normCluster.includes(norm)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Extracts specific identifier tokens (e.g., person names, specific shop brands)
+ * from a query by excluding conversational stop-words and generic category/service terms.
+ */
+export function extractSpecificQueryIdentifiers(query: string): string[] {
+  const normQuery = normalizeSearchString(query);
+  if (!normQuery) return [];
+  const words = normQuery.split(/\s+/).filter(Boolean);
+  return words.filter((w) => {
+    if (w.length < 2) return false;
+    if (/^\d+$/.test(w)) return false;
+    if (GENERIC_QUERY_STOP_WORDS.has(w)) return false;
+    if (isCategoryOrDomainTerm(w)) return false;
+    return true;
+  });
+}
 
 /**
  * Returns all synonym terms (normalized) that expand the user's query keywords.
@@ -657,6 +1440,18 @@ export function expandSynonyms(word: string): string[] {
     }
   }
 
+  for (const nameCluster of NAME_TRANSLITERATION_CLUSTERS) {
+    const normCluster = nameCluster.map(normalizeSearchString);
+    const hasNameMatch = normCluster.some((item) => {
+      if (!item) return false;
+      if (item === norm) return true;
+      return item.split(/\s+/).includes(norm);
+    });
+    if (hasNameMatch) {
+      normCluster.forEach((term) => expansions.add(term));
+    }
+  }
+
   return Array.from(expansions);
 }
 
@@ -674,6 +1469,7 @@ interface SearchTargetStrings {
 /**
  * Calculates a search relevance score for a given entity based on field weights.
  * Max score is unbounded, higher is better match. 0 means no match.
+ * Enforces strict relevance when specific person/shop identifiers are present in the query.
  */
 export function calculateMatchScore(
   targets: SearchTargetStrings,
@@ -692,7 +1488,7 @@ export function calculateMatchScore(
   const normLoc = normalizeSearchString(targets.location);
   const cleanPhone = (targets.phoneDigits || '').replace(/\D/g, '');
 
-  const hasWordOrPhrase = (fieldText: string, term: string): boolean => {
+  const hasWordOrPhrase = (fieldText: string, term: string, allowPhonetic = false): boolean => {
     if (!fieldText || !term) return false;
     if (fieldText === term) return true;
     if (term.includes(' ')) {
@@ -701,7 +1497,14 @@ export function calculateMatchScore(
     const words = fieldText.split(/\s+/);
     if (words.includes(term)) return true;
     if (term.length >= 4) {
-      return words.some((w) => w.startsWith(term) || (w.length >= 4 && term.startsWith(w)));
+      if (words.some((w) => w.startsWith(term) || (w.length >= 4 && term.startsWith(w)))) {
+        return true;
+      }
+    }
+    if (allowPhonetic && term.length >= 3) {
+      if (words.some((w) => areNamesPhoneticallyEquivalent(term, w))) {
+        return true;
+      }
     }
     return false;
   };
@@ -709,31 +1512,35 @@ export function calculateMatchScore(
   let totalScore = 0;
 
   // 1. Exact full query phrase match
-  if (hasWordOrPhrase(normName, normQuery)) totalScore += 120;
-  if (hasWordOrPhrase(normBiz, normQuery)) totalScore += 90;
+  if (hasWordOrPhrase(normName, normQuery, true)) totalScore += 120;
+  if (hasWordOrPhrase(normBiz, normQuery, true)) totalScore += 90;
   if (hasWordOrPhrase(normCategory, normQuery)) totalScore += 80;
   if (hasWordOrPhrase(normServices, normQuery)) totalScore += 65;
   if (hasWordOrPhrase(normLoc, normQuery)) totalScore += 40;
 
   // Phone number match (query is at least 3 digits, e.g. 1122 or 0300)
   const queryDigits = normQuery.replace(/\D/g, '');
-  if (queryDigits.length >= 3 && cleanPhone.includes(queryDigits)) {
+  const hasPhoneMatch = queryDigits.length >= 3 && cleanPhone.includes(queryDigits);
+  if (hasPhoneMatch) {
     totalScore += 85;
   }
 
-  // 2. Word-by-word scoring with synonym expansion
+  // 2. Word-by-word scoring with synonym expansion + specific identifier tracking
   let allWordsMatched = true;
+  const specificWords = extractSpecificQueryIdentifiers(normQuery);
+  let matchedSpecificCount = 0;
 
   for (const word of queryWords) {
     const wordSynonyms = expandSynonyms(word);
+    const isSpecificWord = specificWords.includes(word);
     let wordMatched = false;
 
     for (const syn of wordSynonyms) {
-      if (hasWordOrPhrase(normName, syn)) {
+      if (hasWordOrPhrase(normName, syn, isSpecificWord)) {
         totalScore += syn === word ? 40 : 25;
         wordMatched = true;
       }
-      if (hasWordOrPhrase(normBiz, syn)) {
+      if (hasWordOrPhrase(normBiz, syn, isSpecificWord)) {
         totalScore += syn === word ? 35 : 20;
         wordMatched = true;
       }
@@ -751,9 +1558,22 @@ export function calculateMatchScore(
       }
     }
 
+    if (wordMatched && isSpecificWord) {
+      matchedSpecificCount += 1;
+    }
+
     if (!wordMatched) {
       allWordsMatched = false;
     }
+  }
+
+  // CRITICAL RELEVANCE CHECK:
+  // If the user's query includes specific identifier words (e.g., a specific person/shop name
+  // like "خالد الیکٹریشن" or "ناصر کریانہ سٹور" or "ڈاکٹر فرحان") and NONE of those specific
+  // identifier words matched this target (only the generic category word matched),
+  // reject this target as an unrelated match (score = 0)!
+  if (specificWords.length > 0 && matchedSpecificCount === 0 && !hasPhoneMatch) {
+    return 0;
   }
 
   // Bonus when all query words have a match
@@ -801,8 +1621,10 @@ export interface UniversalSearchOptions {
  *  - Step-by-Step How-To Help Guides
  *  - Admin Custom Search Keywords
  *
- * STRICT PRIVACY GUARANTEE:
+ * STRICT PRIVACY & ISOLATION GUARANTEE:
  *  - Never searches or returns any user's username, password, passwordHash, email, or personal messages (VillageMessage).
+ *  - Keeps people-profile searches and school searches strictly separate: searching for a person's name
+ *    searches `profiles` and never returns unrelated school records (`institutes`) or substitute people.
  */
 export function performUniversalSearch({
   query,
@@ -813,10 +1635,10 @@ export function performUniversalSearch({
   hospitals = [],
   newsEvents = [],
   announcements = [],
-  mandiRates = initialMandiRates,
-  shelters = initialShelters,
+  mandiRates = [],
+  shelters = [],
   helpNotices = [],
-  helpGuides = initialHelpGuides,
+  helpGuides = [],
   customKeywords = [],
   viewerIsSignedIn = false,
   categoryFilter = 'all',
@@ -841,6 +1663,42 @@ export function performUniversalSearch({
           rawItem: safeP,
         };
       });
+  }
+
+  // Check if this query is specifically a people-profile search
+  const peopleCheck = searchPeopleDatabase(query, profiles);
+  const isStrictPeopleSearch =
+    peopleCheck.status !== 'not_people_query' &&
+    categoryFilter === 'all' &&
+    !isExplicitNonProfileEntityQuery(query);
+
+  // If the user is searching for a specific person (or people) and no non-profile entity was requested,
+  // return ONLY the matched person profile(s) from the people database (or [] if not found).
+  // Never return unrelated school records or substitute people!
+  if (isStrictPeopleSearch && peopleCheck.analysis.nameTokens.length > 0) {
+    // Only use strict people results unless the query also matched a hospital/mosque/transport/news item by exact name
+    if (peopleCheck.status === 'exact' || peopleCheck.status === 'multiple') {
+      return peopleCheck.matchedProfiles.map((safeP, idx) => ({
+        id: safeP.id,
+        type: 'profile' as const,
+        title: safeP.name,
+        subtitle: safeP.businessName,
+        categoryLabelUrdu: safeP.customCategory || safeP.category,
+        categoryLabelEn: safeP.category,
+        contactNumber: safeP.mobile,
+        location: safeP.address,
+        score: 200 - idx * 5,
+        rawItem: safeP,
+      }));
+    }
+    if (
+      peopleCheck.status === 'not_found' &&
+      (peopleCheck.analysis.categoryTokens.length > 0 ||
+        peopleCheck.analysis.requestedFields.some((f) => f !== 'profile') ||
+        peopleCheck.analysis.honorificTokens.length > 0)
+    ) {
+      return [];
+    }
   }
 
   const results: SearchResultItem[] = [];
@@ -870,7 +1728,7 @@ export function performUniversalSearch({
       );
       const score = exactKeywordHit ? Math.max(baseScore + 250, 320) : baseScore;
 
-      if (exactKeywordHit || score >= Math.max(minScoreThreshold, 45)) {
+      if (exactKeywordHit) {
         results.push({
           id: feat.id,
           type: 'portal_action',
@@ -888,46 +1746,68 @@ export function performUniversalSearch({
   }
 
   // 1. Search Profiles (strictly whitelisted public fields only — email, username, password excluded)
-  profiles.forEach((p) => {
-    if (p.isHidden || p.isDisabled) return;
-    if (categoryFilter !== 'all' && p.category !== categoryFilter) {
-      return;
-    }
+  // When `isStrictPeopleSearch` is true, `searchPeopleDatabase` already handled `exact`/`multiple`,
+  // and if `status === 'not_found'`, we must NEVER return substitute people from `profiles`!
+  if (!isStrictPeopleSearch) {
+    profiles.forEach((p) => {
+      if (p.isHidden || p.isDisabled) return;
+      if (categoryFilter !== 'all' && p.category !== categoryFilter) {
+        return;
+      }
 
-    const safeP = sanitizePublicProfile(p);
-    const score = normQuery
-      ? calculateMatchScore(
+      const safeP = sanitizePublicProfile(p);
+      // Do NOT concatenate fatherName into `name` unless the user is explicitly asking about father/family
+      // so searching "بشیر احمد" or "اللہ دتہ" does not match another person's fatherName.
+      const includeFatherInSearch =
+        peopleCheck.analysis.requestedFields.includes('family') ||
+        calculateMatchScore(
           {
-            name: `${safeP.name} ${safeP.fatherName || ''}`,
-            category: `${safeP.category} ${safeP.customCategory || ''}`,
-            businessName: `${safeP.businessName} ${safeP.chargesDescription || ''}`,
-            services: [
-              ...(safeP.services || []),
-              safeP.openingTime || '',
-              safeP.closingTime || '',
-            ],
-            location: `${safeP.address} ${safeP.locationLandmark || ''}`,
-            phoneDigits: safeP.mobile,
+            name: safeP.name,
+            category: '',
+            businessName: '',
+            services: [],
+            location: '',
+            phoneDigits: '',
           },
           normQuery
-        )
-      : 1;
+        ) > 0;
 
-    if (!normQuery || score >= minScoreThreshold) {
-      results.push({
-        id: safeP.id,
-        type: 'profile',
-        title: safeP.name,
-        subtitle: safeP.businessName,
-        categoryLabelUrdu: safeP.customCategory || safeP.category,
-        categoryLabelEn: safeP.category,
-        contactNumber: safeP.mobile,
-        location: safeP.address,
-        score,
-        rawItem: safeP,
-      });
-    }
-  });
+      const score = normQuery
+        ? calculateMatchScore(
+            {
+              name: includeFatherInSearch
+                ? `${safeP.name} ${safeP.fatherName || ''}`
+                : safeP.name,
+              category: `${safeP.category} ${safeP.customCategory || ''}`,
+              businessName: `${safeP.businessName} ${safeP.chargesDescription || ''}`,
+              services: [
+                ...(safeP.services || []),
+                safeP.openingTime || '',
+                safeP.closingTime || '',
+              ],
+              location: `${safeP.address} ${safeP.locationLandmark || ''}`,
+              phoneDigits: safeP.mobile,
+            },
+            normQuery
+          )
+        : 1;
+
+      if (!normQuery || score >= minScoreThreshold) {
+        results.push({
+          id: safeP.id,
+          type: 'profile',
+          title: safeP.name,
+          subtitle: safeP.businessName,
+          categoryLabelUrdu: safeP.customCategory || safeP.category,
+          categoryLabelEn: safeP.category,
+          contactNumber: safeP.mobile,
+          location: safeP.address,
+          score,
+          rawItem: safeP,
+        });
+      }
+    });
+  }
 
   // If filtering for a specific profile category, return profile matches
   if (
@@ -987,7 +1867,13 @@ export function performUniversalSearch({
   }
 
   // 3. Search Institutes (Schools & Colleges)
-  if (categoryFilter === 'all' || categoryFilter === 'institute') {
+  // STRICT SEPARATION: Only search school records when `categoryFilter === 'institute'`
+  // OR when the query explicitly asks about a school/college/education (`isExplicitSchoolQuery`).
+  // Never return school records when a user searches for a person's name (like "Akhtar" / "اختر")!
+  if (
+    categoryFilter === 'institute' ||
+    (categoryFilter === 'all' && isExplicitSchoolQuery(normQuery))
+  ) {
     institutes.forEach((inst) => {
       if (inst.isHidden) return;
       const safeInst = sanitizePublicInstitute(inst);

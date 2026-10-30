@@ -1,176 +1,95 @@
 import { Language } from '../types';
 
-// Speech synthesis instance
-let synth: SpeechSynthesis | null = null;
-if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
-  synth = window.speechSynthesis;
+/**
+ * Global slow speech mode state (آہستہ بولیں) for elderly & non-literate villagers
+ */
+let globalSlowSpeechMode = false;
+
+export function setGlobalSpeechSlowMode(slow: boolean): void {
+  globalSlowSpeechMode = slow;
+  try {
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('ratta_kallan_slow_speech_v1', slow ? '1' : '0');
+    }
+  } catch {
+    // ignore storage errors
+  }
 }
 
-let cachedVoices: SpeechSynthesisVoice[] = [];
-let voicesLoaded = false;
-
-// Energetic, clear, respectful ~40yo Pakistani male neighbour cadence (Rate 1.02, Pitch 0.82)
-export const DEFAULT_MALE_ASSISTANT_RATE = 1.02;
-export const DEFAULT_MALE_ASSISTANT_PITCH = 0.82;
-
-let globalSpeechRate = DEFAULT_MALE_ASSISTANT_RATE;
-let globalSpeechPitch = DEFAULT_MALE_ASSISTANT_PITCH;
-let useServerVoice = false;
-
-export const setUseServerVoice = (enabled: boolean) => {
-  useServerVoice = Boolean(enabled);
+export function getGlobalSpeechSlowMode(): boolean {
   try {
-    localStorage.setItem('rk_use_server_voice_v1', enabled ? '1' : '0');
-  } catch {}
-};
-
-export const getUseServerVoice = (): boolean => {
-  if (typeof window !== 'undefined') {
-    try {
-      const saved = localStorage.getItem('rk_use_server_voice_v1');
-      if (saved === '1') useServerVoice = true;
-      else if (saved === '0') useServerVoice = false;
-    } catch {}
-  }
-  return useServerVoice;
-};
-
-export const setSpeechRate = (rate: number) => {
-  if (rate >= 0.7 && rate <= 2.0) {
-    globalSpeechRate = rate;
-    try {
-      localStorage.setItem('rk_speech_rate_v1', String(rate));
-    } catch {}
-  }
-};
-
-export const getSpeechRate = (): number => {
-  if (typeof window !== 'undefined') {
-    try {
-      const saved = localStorage.getItem('rk_speech_rate_v1');
-      if (saved) {
-        const parsed = parseFloat(saved);
-        if (!isNaN(parsed) && parsed > 0.5 && parsed < 2.5) {
-          globalSpeechRate = parsed;
-        }
-      }
-    } catch {}
-  }
-  return globalSpeechRate;
-};
-
-// Universal silent audio context unlock for Mobile Safari, Chrome & Android
-let sharedAudioCtx: AudioContext | null = null;
-let audioContextUnlocked = false;
-
-export const isAudioContextUnlocked = (): boolean => {
-  return Boolean(audioContextUnlocked && sharedAudioCtx && sharedAudioCtx.state === 'running');
-};
-
-export const unlockAudioContext = () => {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    if (!sharedAudioCtx) {
-      sharedAudioCtx = new AudioCtx();
+    if (typeof window !== 'undefined') {
+      const saved = window.localStorage.getItem('ratta_kallan_slow_speech_v1');
+      if (saved === '1') return true;
+      if (saved === '0') return false;
     }
-    if (sharedAudioCtx.state === 'suspended') {
-      sharedAudioCtx.resume().then(() => {
-        audioContextUnlocked = true;
-      }).catch(() => {});
-    } else if (sharedAudioCtx.state === 'running') {
-      audioContextUnlocked = true;
-    }
-    // Play a 1-sample silent buffer to unlock iOS and Android media engines
-    const buffer = sharedAudioCtx.createBuffer(1, 1, 22050);
-    const source = sharedAudioCtx.createBufferSource();
-    source.buffer = buffer;
-    source.connect(sharedAudioCtx.destination);
-    source.start(0);
-    audioContextUnlocked = true;
-
-    // Also wake up speech synthesis if it was sleeping
-    if (synth && synth.paused) {
-      synth.resume();
-    }
-  } catch (e) {
-    // Non-critical, audio context may already be active
+  } catch {
+    // ignore
   }
-};
-
-// Auto-attach unlock on first pointer, touch, click, or keyboard interaction
-if (typeof window !== 'undefined') {
-  const onFirstInteraction = () => {
-    unlockAudioContext();
-    if (isAudioContextUnlocked()) {
-      window.removeEventListener('click', onFirstInteraction);
-      window.removeEventListener('touchstart', onFirstInteraction);
-      window.removeEventListener('pointerdown', onFirstInteraction);
-      window.removeEventListener('keydown', onFirstInteraction);
-    }
-  };
-  window.addEventListener('click', onFirstInteraction, { passive: true });
-  window.addEventListener('touchstart', onFirstInteraction, { passive: true });
-  window.addEventListener('pointerdown', onFirstInteraction, { passive: true });
-  window.addEventListener('keydown', onFirstInteraction, { passive: true });
+  return globalSlowSpeechMode;
 }
 
-// Comprehensive Urdu character & digraph phonetic mapping for fallback English voices
-const urduCharMap: Record<string, string> = {
-  'ا': 'a', 'آ': 'aa', 'ب': 'b', 'پ': 'p', 'ت': 't', 'ٹ': 't', 'ث': 's',
-  'ج': 'j', 'چ': 'ch', 'ح': 'h', 'خ': 'kh', 'د': 'd', 'ڈ': 'd', 'ذ': 'z',
-  'ر': 'r', 'ڑ': 'r', 'ز': 'z', 'ژ': 'zh', 'س': 's', 'ش': 'sh', 'ص': 's',
-  'ض': 'z', 'ط': 't', 'ظ': 'z', 'ع': 'a', 'غ': 'gh', 'ف': 'f', 'ق': 'q',
-  'ک': 'k', 'گ': 'g', 'ل': 'l', 'م': 'm', 'ن': 'n', 'ں': 'n', 'و': 'o',
-  'ہ': 'h', 'ھ': 'h', 'ء': '', 'ی': 'i', 'ے': 'ay', 'ئ': 'e', 'ؤ': 'o',
-  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6',
-  '۷': '7', '۸': '8', '۹': '9', '؟': '?', '،': ',', '۔': '.',
-};
+export function getSpeechRate(customRate?: number): number {
+  if (getGlobalSpeechSlowMode()) {
+    return 0.78; // Noticeably slower, clear, natural pace for elderly listeners
+  }
+  return customRate ?? 0.94;
+}
 
-// Common Urdu words & phrases mapped to clean spoken phonetic phrases if browser voice is English
-const commonUrduPhrases: [RegExp, string][] = [
-  [/السلام علیکم/g, 'Assalam-o-Alaikum'],
-  [/وعلیکم السلام/g, 'Walaikum Assalam'],
-  [/رتہ کلاں/g, 'Ratta Kallan'],
-  [/جھنگ/g, 'Jhang'],
-  [/خوش آمدید/g, 'khush aamdeed'],
-  [/ورچوئل/g, 'virtual'],
-  [/پورٹل/g, 'portal'],
-  [/سپر ایڈمن/g, 'Super Admin'],
-  [/اسکول مددگار/g, 'School Madadgar'],
-  [/اسکول|سکول/g, 'school'],
-  [/کالج/g, 'college'],
-  [/مسجد/g, 'masjid'],
-  [/نماز/g, 'namaz'],
-  [/استاد/g, 'ustad'],
-  [/طالب علم/g, 'student'],
-  [/ہوم ورک/g, 'homework'],
-  [/سبق/g, 'sabaq'],
-  [/سوال/g, 'sawaal'],
-  [/جواب/g, 'jawab'],
-  [/ہسپتال|اسپتال/g, 'hospital'],
-  [/ایمرجنسی/g, 'emergency'],
-  [/ریسکیو/g, 'Rescue'],
-  [/ایمبولینس/g, 'ambulance'],
-  [/ڈاکٹر/g, 'doctor'],
-  [/کلینک/g, 'clinic'],
-  [/ڈسپنسری/g, 'dispensary'],
-  [/میڈیکل اسٹور|فارمیسی/g, 'medical store'],
-  [/موبائل نمبر|فون نمبر|رابطہ نمبر/g, 'mobile number'],
-  [/فوری رابطہ/g, 'fauri rabta'],
-  [/الیکٹریشن/g, 'electrician'],
-  [/مستری/g, 'mistri builder'],
-  [/ٹریکٹر/g, 'tractor'],
-  [/کریانہ/g, 'karyana store'],
-  [/درزی/g, 'darzi tailor'],
-  [/گاڑی/g, 'gaari van'],
-  [/کرایہ/g, 'kiraya fare'],
-  [/روانگی/g, 'rawangi departure'],
-  [/روٹ/g, 'route'],
-];
+/**
+ * Detects the actual script/language of a text string so we never force Urdu
+ * Nastaliq script into an English voice or treat English/Roman Urdu as Urdu script.
+ */
+export function detectTextLanguage(text: string, fallbackLang: Language = 'ur'): Language {
+  if (!text || !text.trim()) return fallbackLang;
+  // Count Urdu/Arabic script characters vs Gurmukhi vs Latin characters
+  const urduMatches = text.match(/[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/g);
+  const gurmukhiMatches = text.match(/[\u0A00-\u0A7F]/g);
+  const latinMatches = text.match(/[a-zA-Z]/g);
 
-// Numbers map in Urdu words for natural spoken phonetics
-export const digitToUrduWord: Record<string, string> = {
+  const urduCount = urduMatches ? urduMatches.length : 0;
+  const gurmukhiCount = gurmukhiMatches ? gurmukhiMatches.length : 0;
+  const latinCount = latinMatches ? latinMatches.length : 0;
+
+  if (gurmukhiCount > urduCount && gurmukhiCount > latinCount) {
+    return 'pa';
+  }
+  if (urduCount > 0 && urduCount >= latinCount * 0.35) {
+    return fallbackLang === 'pa' ? 'pa' : 'ur';
+  }
+  if (latinCount > 0 && urduCount === 0) {
+    return 'en';
+  }
+  return fallbackLang;
+}
+
+/**
+ * Cleans emojis, HTML tags, markdown symbols, URLs, and decorative characters
+ * from text before passing to TTS so the voice engine reads only human-meaningful content.
+ */
+export function cleanSpeechText(text: string): string {
+  if (!text) return '';
+  return text
+    // Strip HTML tags if any
+    .replace(/<[^>]+>/g, ' ')
+    // Strip URLs
+    .replace(/https?:\/\/\S+/gi, ' ')
+    // Remove emojis & pictographs
+    .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}\u{1F000}-\u{1F02F}\u{1F0A0}-\u{1F0FF}\u{1F100}-\u{1F64F}\u{1F680}-\u{1F6FF}\u{1F910}-\u{1F96B}\u{1F980}-\u{1F9E0}]/gu, ' ')
+    // Remove decorative arrows, bullets, markdown characters, and box drawing symbols
+    .replace(/[•●▪▸►◄➔➜➝➞➟➠➢➣➤➥➦➧➨✓✔✕✖✗✘★☆✦✧✩✪✫✬✭✮✯✰⚠️🚨📞📍🌾🕌🏫🚐🏥📢💰🩸📦🔑🔒🔓🎙️🔊🐢⚡⏹️⏸️▶️🔄]/g, ' ')
+    // Convert newlines and pipe separators into natural sentence pauses
+    .replace(/\r?\n+/g, '۔ ')
+    .replace(/[|•·]/g, '، ')
+    .replace(/[_*~`#>+=^\\]/g, ' ')
+    // Collapse multiple periods/stops
+    .replace(/۔\s*۔+/g, '۔ ')
+    .replace(/\.\s*\.+/g, '. ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+const URDU_DIGIT_WORDS: Record<string, string> = {
   '0': 'صفر',
   '1': 'ایک',
   '2': 'دو',
@@ -183,532 +102,1289 @@ export const digitToUrduWord: Record<string, string> = {
   '9': 'نو',
 };
 
-export const convertPhoneToUrduWords = (phone: string): string => {
-  const digits = phone.replace(/\D/g, '');
-  if (!digits) return phone;
-  const words = digits.split('').map((d) => digitToUrduWord[d] || d);
-  if (words.length === 11) {
-    return `${words.slice(0, 4).join(' ')}، ${words.slice(4, 7).join(' ')}، ${words.slice(7).join(' ')}`;
-  }
-  return words.join(' ');
-};
+function digitsToUrduSpokenWords(digitsStr: string): string {
+  return digitsStr
+    .replace(/[-\s]/g, '')
+    .split('')
+    .map((d) => URDU_DIGIT_WORDS[d] || d)
+    .join(' ');
+}
 
-export const convertTextToPakistaniUrduPhonetics = (text: string): string => {
+/**
+ * Converts numbers, phone numbers, times, prices, and common English/abbreviated terms into
+ * pure Pakistani Urdu phonetic script so the TTS voice speaks with a natural,
+ * clear Pakistani Urdu accent and cadence.
+ */
+export function convertTextToPakistaniUrduPhonetics(text: string): string {
   if (!text) return '';
-  let result = text;
 
-  // Convert phone numbers like 0327-0019099 or 03001234567 into natural Urdu spoken words
-  result = result.replace(/03\d{2}[-\s]?\d{7}/g, (match) => {
-    return convertPhoneToUrduWords(match);
+  let out = cleanSpeechText(text);
+
+  // Convert Pakistani mobile phone numbers (e.g. 0300-1234567 or 03001234567) into clear digit-by-digit Urdu words
+  out = out.replace(/\b(03\d{2})[-\s]?(\d{7})\b/g, (_, prefix: string, rest: string) => {
+    const pWords = digitsToUrduSpokenWords(prefix);
+    const rWords1 = digitsToUrduSpokenWords(rest.slice(0, 3));
+    const rWords2 = digitsToUrduSpokenWords(rest.slice(3));
+    return `${pWords}، ${rWords1}، ${rWords2}`;
   });
 
-  // Convert Time ranges like "08:00 AM – 09:00 PM"
-  result = result
-    .replace(/08:00\s*AM/gi, 'صبح آٹھ بجے')
-    .replace(/08:30\s*AM/gi, 'صبح ساڑھے آٹھ بجے')
-    .replace(/09:00\s*AM/gi, 'صبح نو بجے')
-    .replace(/10:00\s*AM/gi, 'صبح دس بجے')
-    .replace(/10:30\s*AM/gi, 'صبح ساڑھے دس بجے')
-    .replace(/11:00\s*AM/gi, 'صبح گیارہ بجے')
-    .replace(/12:00\s*PM/gi, 'دوپہر بارہ بجے')
-    .replace(/01:00\s*PM/gi, 'دوپہر ایک بجے')
-    .replace(/02:00\s*PM/gi, 'دوپہر دو بجے')
-    .replace(/03:00\s*PM/gi, 'دوپہر تین بجے')
-    .replace(/04:00\s*PM/gi, 'شام چار بجے')
-    .replace(/05:00\s*PM/gi, 'شام پانچ بجے')
-    .replace(/06:00\s*PM/gi, 'شام چھ بجے')
-    .replace(/07:00\s*PM/gi, 'شام سات بجے')
-    .replace(/08:00\s*PM/gi, 'رات آٹھ بجے')
-    .replace(/09:00\s*PM/gi, 'رات نو بجے')
-    .replace(/10:00\s*PM/gi, 'رات دس بجے')
-    .replace(/11:00\s*PM/gi, 'رات گیارہ بجے');
+  // Convert landline phone numbers (e.g. 047-9200234 or 047-6210000)
+  out = out.replace(/\b(0\d{2,3})[-\s](\d{6,8})\b/g, (_, area: string, num: string) => {
+    const aWords = digitsToUrduSpokenWords(area);
+    const nWords = digitsToUrduSpokenWords(num);
+    return `${aWords}، ${nWords}`;
+  });
 
-  // Convert common English words to pure Urdu
-  result = result
-    .replace(/\bOpen Now\b/gi, 'ابھی کھلا ہے')
-    .replace(/\bClosed\b/gi, 'ابھی بند ہے')
-    .replace(/\bBreak\b/gi, 'وقفہ')
-    .replace(/\bSuper Admin\b/gi, 'سپر ایڈمن')
-    .replace(/\bHelpline\b/gi, 'ہیلپ لائن')
-    .replace(/\bWhatsApp\b/gi, 'واٹس ایپ')
-    .replace(/[-–—]/g, ' تا ');
+  // Convert formatted prices with commas (e.g., 3,950 or 12,500) so commas inside numbers don't split digits
+  out = out.replace(/\b(\d{1,3}),(\d{3})\b/g, '$1$2');
 
-  return result;
-};
+  // Convert emergency shortcodes into natural Urdu pronunciation
+  out = out.replace(/\b1122\b/g, 'گیارہ بائیس');
+  out = out.replace(/\b115\b/g, 'ایک ایک پانچ');
+  out = out.replace(/\b15\b/g, 'پندرہ');
+  out = out.replace(/\b16\b/g, 'سولہ');
+  out = out.replace(/\b1030\b/g, 'دس تیس');
+  out = out.replace(/\b1717\b/g, 'سترہ سترہ');
 
-// Clean speech helper that ensures natural phrasing without robotic character decomposition
-export const cleanSpeechText = (text: string): string => {
-  if (!text) return '';
-  return text
-    .replace(/[#*_~`]/g, '')
-    .replace(/https?:\/\/\S+/g, 'link')
-    .replace(/[🚨📢🩺🏥🕌🏫🚌⚡🔨🚜🛒📱📩🔔⭐⚠️🚫❌]/g, ' ')
+  // Convert common English abbreviations and medical/village terms into Urdu script
+  const phoneticDictionary: Array<[RegExp, string]> = [
+    [/\b24\/7\b/gi, 'چوبیس گھنٹے'],
+    [/\bAM\b/gi, 'صبح'],
+    [/\bPM\b/gi, 'شام'],
+    [/\bRHC\b/gi, 'دیہی مرکزِ صحت'],
+    [/\bBHU\b/gi, 'بنیادی مرکزِ صحت'],
+    [/\bDHQ\b/gi, 'ڈسٹرکٹ ہیڈ کوارٹر ہسپتال'],
+    [/\bTHQ\b/gi, 'تحصیل ہیڈ کوارٹر ہسپتال'],
+    [/\bAI\b/gi, 'اے آئی'],
+    [/\bRs\.?\s*/gi, 'روپے '],
+    [/\bPKR\b/gi, 'روپے'],
+    [/\bDr\.?\s+/gi, 'ڈاکٹر '],
+    [/\bO\+/gi, 'او پازیٹو'],
+    [/\bO-/gi, 'او نیگیٹو'],
+    [/\bA\+/gi, 'اے پازیٹو'],
+    [/\bA-/gi, 'اے نیگیٹو'],
+    [/\bB\+/gi, 'بی پازیٹو'],
+    [/\bB-/gi, 'بی نیگیٹو'],
+    [/\bAB\+/gi, 'اے بی پازیٹو'],
+    [/\bAB-/gi, 'اے بی نیگیٹو'],
+    [/\bRatta Kallan\b/gi, 'رتہ کلاں'],
+    [/\bJhang\b/gi, 'جھنگ'],
+    [/\bkm\b/gi, 'کلومیٹر'],
+  ];
+
+  for (const [pattern, replacement] of phoneticDictionary) {
+    out = out.replace(pattern, replacement);
+  }
+
+  // Convert time format like 05:30 or 5:30 into natural Urdu "5 بج کر 30 منٹ"
+  out = out.replace(/\b0?(\d{1,2}):00\b/g, '$1 بجے');
+  out = out.replace(/\b0?(\d{1,2}):(\d{2})\b/g, '$1 بج کر $2 منٹ');
+
+  // Replace hyphens only when used as a range between numbers/times
+  out = out.replace(/(\d)\s*[-–—]\s*(\d)/g, '$1 تا $2');
+
+  // Ensure natural breathing pauses at Urdu commas and full stops
+  out = out
+    .replace(/\s*،\s*/g, '، ')
+    .replace(/\s*۔\s*/g, '۔ ')
+    .replace(/\s*:\s*/g, ': ')
     .replace(/\s+/g, ' ')
     .trim();
+
+  return out;
+}
+
+/**
+ * Splits long Urdu/English text into smaller natural sentence/clause chunks so TTS
+ * never gets cut off mid-sentence by browser speechSynthesis timeouts or buffer limits.
+ */
+export function splitTextIntoUrduChunks(text: string, maxChunkLen = 150): string[] {
+  const cleaned = text.trim();
+  if (!cleaned) return [];
+  if (cleaned.length <= maxChunkLen) return [cleaned];
+
+  // Split by Urdu full stop (۔), English period (.), question mark (؟/?), exclamation (!), or semicolon
+  const rawSentences = cleaned
+    .split(/(?<=[۔.؟?!\n])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  let current = '';
+
+  for (const sentence of rawSentences) {
+    if (sentence.length > maxChunkLen) {
+      if (current) {
+        chunks.push(current.trim());
+        current = '';
+      }
+      // Split long sentence further by Urdu comma (،), English comma (,), or colon (:)
+      const subParts = sentence
+        .split(/(?<=[،,:])\s+/)
+        .map((p) => p.trim())
+        .filter(Boolean);
+
+      for (const part of subParts) {
+        if (part.length > maxChunkLen) {
+          // Hard word-boundary split if a single clause has no commas
+          if (current) {
+            chunks.push(current.trim());
+            current = '';
+          }
+          const words = part.split(/\s+/);
+          let wordChunk = '';
+          for (const w of words) {
+            if ((wordChunk + ' ' + w).trim().length <= maxChunkLen) {
+              wordChunk = (wordChunk + ' ' + w).trim();
+            } else {
+              if (wordChunk) chunks.push(wordChunk);
+              wordChunk = w;
+            }
+          }
+          if (wordChunk) current = wordChunk;
+        } else if ((current + ' ' + part).trim().length <= maxChunkLen) {
+          current = (current + ' ' + part).trim();
+        } else {
+          if (current) chunks.push(current.trim());
+          current = part;
+        }
+      }
+    } else if ((current + ' ' + sentence).trim().length <= maxChunkLen) {
+      current = (current + ' ' + sentence).trim();
+    } else {
+      if (current) chunks.push(current.trim());
+      current = sentence;
+    }
+  }
+
+  if (current.trim()) {
+    chunks.push(current.trim());
+  }
+
+  return chunks.length > 0 ? chunks : [cleaned];
+}
+
+/**
+ * Shared Web Audio API Context for reliable mobile & desktop notification chimes
+ */
+let sharedAudioCtx: AudioContext | null = null;
+
+function getOrCreateAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  const AudioCtx =
+    window.AudioContext ||
+    (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return null;
+  if (!sharedAudioCtx) {
+    sharedAudioCtx = new AudioCtx();
+  }
+  if (sharedAudioCtx.state === 'suspended') {
+    sharedAudioCtx.resume().catch(() => {});
+  }
+  return sharedAudioCtx;
+}
+
+/**
+ * Unlocks browser audio & speech synthesis on first user tap/click
+ */
+export function unlockAudioContext(): void {
+  try {
+    const ctx = getOrCreateAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+  } catch {
+    // Ignore
+  }
+}
+
+const playedChimeEventIds = new Set<string>();
+
+/**
+ * Plays a pleasant, audible chime when voice assistant activates, completes, or notifications arrive
+ */
+export function playNotificationChime(
+  type:
+    | 'start'
+    | 'end'
+    | 'success'
+    | 'alert'
+    | 'chime'
+    | 'teacher'
+    | 'message'
+    | 'announcement'
+    | string = 'start',
+  options?: { eventId?: string; forcePlay?: boolean; [key: string]: unknown } | number
+): void {
+  try {
+    if (options && typeof options === 'object' && options.eventId && !options.forcePlay) {
+      if (playedChimeEventIds.has(options.eventId)) {
+        return;
+      }
+      playedChimeEventIds.add(options.eventId);
+    }
+
+    if (type === 'message') {
+      playIncomingMessageBell();
+      return;
+    }
+
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return;
+
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+
+    osc.type = type === 'alert' || type === 'announcement' ? 'triangle' : 'sine';
+    const now = ctx.currentTime;
+
+    if (type === 'start') {
+      osc.frequency.setValueAtTime(523.25, now); // C5
+      osc.frequency.exponentialRampToValueAtTime(659.25, now + 0.14); // E5
+    } else if (type === 'alert' || type === 'announcement') {
+      osc.frequency.setValueAtTime(587.33, now); // D5
+      osc.frequency.exponentialRampToValueAtTime(880.0, now + 0.18); // A5
+    } else {
+      osc.frequency.setValueAtTime(659.25, now); // E5
+      osc.frequency.exponentialRampToValueAtTime(783.99, now + 0.16); // G5
+    }
+
+    gain.gain.setValueAtTime(0.08, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+
+    osc.start(now);
+    osc.stop(now + 0.23);
+  } catch {
+    // Ignore audio context restriction errors
+  }
+}
+
+/**
+ * Plays a distinct, clear dual-tone incoming message bell (پیغام کی گھنٹی)
+ * when a new message arrives for a profile or signed-in villager.
+ */
+export function playIncomingMessageBell(): void {
+  try {
+    const ctx = getOrCreateAudioContext();
+    if (!ctx) return;
+
+    const now = ctx.currentTime;
+
+    // First chime note (G5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'triangle';
+    osc1.frequency.setValueAtTime(783.99, now);
+    gain1.gain.setValueAtTime(0.16, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    osc1.start(now);
+    osc1.stop(now + 0.26);
+
+    // Second chime note (B5)
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(987.77, now + 0.18);
+    gain2.gain.setValueAtTime(0.18, now + 0.18);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.55);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+    osc2.start(now + 0.18);
+    osc2.stop(now + 0.56);
+  } catch {
+    // Ignore audio context errors
+  }
+}
+
+export interface SpeakOptions {
+  isFemaleVillageVoice?: boolean;
+  voiceGender?: 'male' | 'female';
+  rate?: number;
+  pitch?: number;
+  volume?: number;
+  preferOnlineNeural?: boolean;
+  onSegmentChange?: (segmentText: string, index: number, total: number) => void;
+  onError?: (errorMsg: string) => void;
+}
+
+export interface LanguageSegment {
+  text: string;
+  lang: Language;
+}
+
+export interface VoiceAvailabilityStatus {
+  supported: boolean;
+  hasNativeUrduVoice: boolean;
+  voiceName: string;
+  voiceLang: string;
+  mode:
+    | 'azure_neural'
+    | 'gemini_neural_tts'
+    | 'native_urdu'
+    | 'south_asian_phonetic'
+    | 'roman_transliteration'
+    | 'english'
+    | 'unsupported';
+  statusMessageUrdu: string;
+}
+
+const URDU_NUMBER_WORDS_0_TO_100: Record<number, string> = {
+  0: 'صفر',
+  1: 'ایک',
+  2: 'دو',
+  3: 'تین',
+  4: 'چار',
+  5: 'پانچ',
+  6: 'چھ',
+  7: 'سات',
+  8: 'آٹھ',
+  9: 'نو',
+  10: 'دس',
+  11: 'گیارہ',
+  12: 'بارہ',
+  13: 'تیرہ',
+  14: 'چودہ',
+  15: 'پندرہ',
+  16: 'سولہ',
+  17: 'سترہ',
+  18: 'اٹھارہ',
+  19: 'انیس',
+  20: 'بیس',
+  21: 'اکیس',
+  22: 'بائیس',
+  23: 'تئیس',
+  24: 'چوبیس',
+  25: 'پچیس',
+  26: 'چھبیس',
+  27: 'ستائیس',
+  28: 'اٹھائیس',
+  29: 'انتیس',
+  30: 'تیس',
+  35: 'پینتیس',
+  40: 'چالیس',
+  45: 'پینتالیس',
+  50: 'پچاس',
+  60: 'ساٹھ',
+  70: 'ستر',
+  75: 'پچھتر',
+  80: 'اسی',
+  90: 'نوے',
+  100: 'ایک سو',
 };
 
-// Intelligible Roman fallback for English-only synthesis engines (never outputs isolated consonants)
-export const urduToRomanUrdu = (text: string): string => {
-  if (!text) return '';
+const ENGLISH_ONES = [
+  'zero',
+  'one',
+  'two',
+  'three',
+  'four',
+  'five',
+  'six',
+  'seven',
+  'eight',
+  'nine',
+  'ten',
+  'eleven',
+  'twelve',
+  'thirteen',
+  'fourteen',
+  'fifteen',
+  'sixteen',
+  'seventeen',
+  'eighteen',
+  'nineteen',
+];
+
+const ENGLISH_TENS = [
+  '',
+  '',
+  'twenty',
+  'thirty',
+  'forty',
+  'fifty',
+  'sixty',
+  'seventy',
+  'eighty',
+  'ninety',
+];
+
+/**
+ * Converts a number into its exact spoken word in Urdu or English
+ * (e.g., 1 -> "ایک" / "one", 10 -> "دس" / "ten", 25 -> "پچیس" / "twenty-five", 100 -> "ایک سو" / "one hundred").
+ */
+export function formatNumberForSpeech(numInput: number | string, lang: Language = 'ur'): string {
+  const n = typeof numInput === 'number' ? numInput : parseInt(String(numInput).trim(), 10);
+  if (Number.isNaN(n)) return String(numInput);
+
+  if (lang === 'en') {
+    if (n < 0) return `minus ${formatNumberForSpeech(Math.abs(n), 'en')}`;
+    if (n < 20) return ENGLISH_ONES[n];
+    if (n < 100) {
+      const t = Math.floor(n / 10);
+      const r = n % 10;
+      return r === 0 ? ENGLISH_TENS[t] : `${ENGLISH_TENS[t]}-${ENGLISH_ONES[r]}`;
+    }
+    if (n === 100) return 'one hundred';
+    if (n < 1000) {
+      const h = Math.floor(n / 100);
+      const r = n % 100;
+      return r === 0
+        ? `${ENGLISH_ONES[h]} hundred`
+        : `${ENGLISH_ONES[h]} hundred and ${formatNumberForSpeech(r, 'en')}`;
+    }
+    return String(n);
+  }
+
+  // Urdu number words
+  if (URDU_NUMBER_WORDS_0_TO_100[n]) {
+    return URDU_NUMBER_WORDS_0_TO_100[n];
+  }
+  if (n > 100 && n < 1000) {
+    const h = Math.floor(n / 100);
+    const r = n % 100;
+    const hWord = URDU_NUMBER_WORDS_0_TO_100[h] || String(h);
+    const rWord = r > 0 ? ` ${formatNumberForSpeech(r, 'ur')}` : '';
+    return `${hWord} سو${rWord}`;
+  }
+  return String(n);
+}
+
+/**
+ * Splits a sentence containing mixed Urdu and English words into language-specific segments
+ * so Urdu phrases are spoken with Pakistani Urdu pronunciation and embedded English phrases
+ * (e.g. "آج ہم English میں five new words سیکھیں گے۔") are spoken with authentic English pronunciation.
+ */
+export function splitMixedLanguageSegments(
+  text: string,
+  defaultLang: Language = 'ur'
+): LanguageSegment[] {
+  const cleaned = cleanSpeechText(text);
+  if (!cleaned) return [];
+
+  const hasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(cleaned);
+  const hasLatin = /[A-Za-z]/.test(cleaned);
+
+  if (!hasUrdu && hasLatin) {
+    return [{ text: cleaned, lang: 'en' }];
+  }
+  if (hasUrdu && !hasLatin) {
+    return [{ text: cleaned, lang: defaultLang === 'pa' ? 'pa' : 'ur' }];
+  }
+
+  // Mixed Urdu + English text: group tokens by script
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  const segments: LanguageSegment[] = [];
+
+  for (const token of tokens) {
+    const tokenHasUrdu = /[\u0600-\u06FF\u0750-\u077F\uFB50-\uFDFF\uFE70-\uFEFF]/.test(token);
+    const tokenHasLatin = /[A-Za-z]/.test(token);
+
+    let tokenLang: Language;
+    if (tokenHasUrdu) {
+      tokenLang = defaultLang === 'pa' ? 'pa' : 'ur';
+    } else if (tokenHasLatin) {
+      // Check if it's just an abbreviation like AM/PM/km/Rs that should stay with Urdu if surrounded by Urdu
+      if (/^(AM|PM|Rs\.?|PKR|km)$/i.test(token) && segments.length > 0 && segments[segments.length - 1].lang !== 'en') {
+        tokenLang = segments[segments.length - 1].lang;
+      } else {
+        tokenLang = 'en';
+      }
+    } else {
+      // Pure digits or punctuation: inherit the previous segment's language or defaultLang
+      tokenLang = segments.length > 0 ? segments[segments.length - 1].lang : defaultLang;
+    }
+
+    if (segments.length > 0 && segments[segments.length - 1].lang === tokenLang) {
+      segments[segments.length - 1].text += ` ${token}`;
+    } else {
+      segments.push({ text: token, lang: tokenLang });
+    }
+  }
+
+  return segments;
+}
+
+let activeAudioElement: HTMLAudioElement | null = null;
+let activeSpeakSessionId = 0;
+let isSpeechCurrentlyPlaying = false;
+let isSpeechCurrentlyPaused = false;
+let cachedServerStatus: {
+  checked: boolean;
+  geminiConfigured: boolean;
+  azureSpeechConfigured: boolean;
+  activeTtsProvider: string;
+} = {
+  checked: false,
+  geminiConfigured: false,
+  azureSpeechConfigured: false,
+  activeTtsProvider: 'browser_segmented_speech',
+};
+
+// Keep strong references to active utterances so Chrome/Android GC never collects them mid-sentence!
+const activeUtterances: SpeechSynthesisUtterance[] = [];
+const clientAudioDataCache = new Map<string, string>();
+
+type SpeechStateListener = (state: { isPlaying: boolean; isPaused: boolean }) => void;
+const speechStateListeners = new Set<SpeechStateListener>();
+
+function notifySpeechStateChange(): void {
+  const snapshot = {
+    isPlaying: isSpeechCurrentlyPlaying,
+    isPaused: isSpeechCurrentlyPaused,
+  };
+  speechStateListeners.forEach((listener) => {
+    try {
+      listener(snapshot);
+    } catch {
+      // ignore listener error
+    }
+  });
+}
+
+export function subscribeSpeechState(listener: SpeechStateListener): () => void {
+  speechStateListeners.add(listener);
+  return () => {
+    speechStateListeners.delete(listener);
+  };
+}
+
+export function isCurrentlySpeaking(): boolean {
+  return isSpeechCurrentlyPlaying;
+}
+
+export function isSpeechPaused(): boolean {
+  return isSpeechCurrentlyPaused;
+}
+
+/**
+ * Queries the backend `/api/ai/status` once to check if Azure Neural TTS or Gemini 3.8 TTS is active.
+ */
+export async function checkOnlineVoiceProviderStatus(): Promise<typeof cachedServerStatus> {
+  if (typeof window === 'undefined') return cachedServerStatus;
+  try {
+    const res = await fetch('/api/ai/status');
+    if (res.ok) {
+      const data = await res.json();
+      cachedServerStatus = {
+        checked: true,
+        geminiConfigured: Boolean(data.geminiConfigured),
+        azureSpeechConfigured: Boolean(data.azureSpeechConfigured),
+        activeTtsProvider: data.activeTtsProvider || 'browser_segmented_speech',
+      };
+    }
+  } catch {
+    // Offline or running in unit tests
+  }
+  return cachedServerStatus;
+}
+
+/**
+ * Comprehensive Urdu-to-Roman-Urdu word & character transliterator.
+ * Used ONLY when the user's device/browser has NO Urdu, Punjabi, Hindi, or Arabic
+ * voice installed at all AND online neural TTS is unavailable, so an English fallback
+ * voice can still read every word of the answer from start to finish.
+ */
+export function transliterateUrduScriptToRoman(text: string): string {
   let result = cleanSpeechText(text);
 
-  // Common high-priority welcome & terms phrases
-  if (result.includes('کوئی بھی اس ایپ کا غلط استعمال نہ کرے') || result.includes('ضروری ہدایات غور سے سنیں')) {
-    return 'Assalam-o-Alaikum! Ratta Kallan Jhang portal main khush aamdeed. Zaroori hidayaat: Koi is app ka ghalat istimal na kare, aurat ka number share na kare, dhamki ya dhoka na kare. Admin is ko nigrani karte hain.';
+  const phraseDictionary: Array<[RegExp, string]> = [
+    [/السلام علیکم/g, 'Assalam-o-Alaikum'],
+    [/وعلیکم السلام/g, 'Wa-Alaikum-us-Salam'],
+    [/رتہ کلاں/g, 'Ratta Kallan'],
+    [/جھنگ/g, 'Jhang'],
+    [/خوش آمدید/g, 'Khush Aamdeed'],
+    [/معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں/g, 'Maazrat, yeh maloomat filhal portal par dastiyab nahi hain'],
+    [/معاف کریں، مجھے معلوم نہیں/g, 'Maaf karein, mujhe maloom nahi'],
+    [/مجھے معلوم نہیں/g, 'Mujhe maloom nahi'],
+    [/براہ کرم نیچے دیے گئے مثال والے بٹن دبائیں/g, 'Barah-e-karam neechay diye gaye misaal wale button dabayein'],
+    [/کوئی میچنگ رزلٹ نہیں ملا/g, 'Koi matching result nahi mila'],
+    [/پاکستان کا دارالحکومت اسلام آباد ہے/g, 'Pakistan ka dar-ul-hukoomat Islamabad hai'],
+    [/بچو، آج ہم ایک سے دس تک گنتی سیکھیں گے/g, 'Bacho, aaj hum aik se das tak ginti seekhein ge'],
+    [/فون نمبر/g, 'phone number'],
+    [/موبائل نمبر/g, 'mobile number'],
+    [/پتہ/g, 'pata'],
+    [/ایڈریس/g, 'address'],
+    [/اوقاتِ کار/g, 'auqat-e-kaar'],
+    [/اوقات/g, 'auqat'],
+    [/کھلنے کا وقت/g, 'khulne ka waqt'],
+    [/بند ہونے کا وقت/g, 'band hone ka waqt'],
+    [/وقفہ/g, 'waqfa'],
+    [/حالت/g, 'haalat'],
+    [/اس وقت کھلا ہے/g, 'is waqt khula hai'],
+    [/اس وقت بند ہے/g, 'is waqt band hai'],
+    [/اس وقت وقفہ ہے/g, 'is waqt waqfa hai'],
+    [/مرکزی جامع مسجد/g, 'Markazi Jamia Masjid'],
+    [/جامع مسجد/g, 'Jamia Masjid'],
+    [/مسجد/g, 'Masjid'],
+    [/مساجد/g, 'Masajid'],
+    [/امام صاحب/g, 'Imam Sahib'],
+    [/نماز کے اوقات/g, 'namaz ke auqat'],
+    [/فجر/g, 'Fajr'],
+    [/ظہر/g, 'Zohar'],
+    [/عصر/g, 'Asr'],
+    [/مغرب/g, 'Maghrib'],
+    [/عشاء/g, 'Isha'],
+    [/جمعہ/g, 'Jummah'],
+    [/غروب آفتاب/g, 'ghuroob-e-aftab'],
+    [/گورنمنٹ ہائی سکول/g, 'Government High School'],
+    [/پرائمری سکول/g, 'Primary School'],
+    [/سکول/g, 'School'],
+    [/اسکول/g, 'School'],
+    [/مدرسہ/g, 'Madrasa'],
+    [/کالج/g, 'College'],
+    [/بنیادی مرکز صحت/g, 'Basic Health Unit'],
+    [/دیہی مرکز صحت/g, 'Rural Health Center'],
+    [/ہسپتال/g, 'Hospital'],
+    [/کلینک/g, 'Clinic'],
+    [/ڈاکٹر/g, 'Doctor'],
+    [/میڈیکل سٹور/g, 'Medical Store'],
+    [/ایمرجنسی/g, 'Emergency'],
+    [/ریسکیو/g, 'Rescue'],
+    [/گاڑی/g, 'Gaari'],
+    [/ہائی ایس/g, 'Hiace'],
+    [/وین/g, 'Van'],
+    [/بس/g, 'Bus'],
+    [/کرایہ/g, 'Kiraya'],
+    [/روٹ/g, 'Route'],
+    [/روانگی/g, 'Rawangi'],
+    [/واپسی/g, 'Wapsi'],
+    [/ڈرائیور/g, 'Driver'],
+    [/الیکٹریشن/g, 'Electrician'],
+    [/مستری/g, 'Mistri'],
+    [/پلمبر/g, 'Plumber'],
+    [/درزی/g, 'Darzi'],
+    [/حجام/g, 'Hajjam'],
+    [/کریانہ/g, 'Karyana'],
+    [/آٹا چکی/g, 'Atta Chakki'],
+    [/ٹریکٹر/g, 'Tractor'],
+    [/مزدور/g, 'Mazdoor'],
+    [/سولر/g, 'Solar'],
+    [/منڈی ریٹ/g, 'Mandi Rate'],
+    [/گندم/g, 'Gandum'],
+    [/کپاس/g, 'Kapas'],
+    [/چاول/g, 'Chawal'],
+    [/مکئی/g, 'Makai'],
+    [/گڑ/g, 'Gur'],
+    [/فی من/g, 'fi mann'],
+    [/روپے/g, 'rupay'],
+    [/صبح/g, 'subah'],
+    [/دوپہر/g, 'dopehar'],
+    [/شام/g, 'shaam'],
+    [/رات/g, 'raat'],
+    [/بجے/g, 'bajay'],
+    [/بج کر/g, 'baj kar'],
+    [/منٹ/g, 'minute'],
+    [/محلہ/g, 'Mohalla'],
+    [/مین بازار/g, 'Main Bazaar'],
+    [/لاری اڈا/g, 'Lari Adda'],
+    [/نزد/g, 'nazd'],
+    [/تا/g, 'se'],
+    [/اور/g, 'aur'],
+    [/کا/g, 'ka'],
+    [/کی/g, 'ki'],
+    [/کے/g, 'ke'],
+    [/میں/g, 'mein'],
+    [/ہے/g, 'hai'],
+    [/ہیں/g, 'hain'],
+    [/پر/g, 'par'],
+    [/سے/g, 'se'],
+    [/کو/g, 'ko'],
+    [/نے/g, 'ne'],
+    [/یہ/g, 'yeh'],
+    [/وہ/g, 'woh'],
+    [/نام/g, 'naam'],
+    [/کاروبار/g, 'karobar'],
+    [/دکان/g, 'dukan'],
+    [/تفصیل/g, 'tafseel'],
+  ];
+
+  for (const [pattern, replacement] of phraseDictionary) {
+    result = result.replace(pattern, ` ${replacement} `);
   }
 
-  if (result.includes('اسکول مددگار')) {
-    return 'Assalam-o-Alaikum! Ratta Kallan virtual school main khush aamdeed. Aap nursery se matric tak koi bhi sawaal pooch saktay hain.';
-  }
-
-  for (const [pattern, replacement] of commonUrduPhrases) {
-    result = result.replace(pattern, replacement);
-  }
-
-  // Remove leftover Arabic diacritics/symbols without destroying words
-  return result.replace(/[\u064B-\u065F\u06D6-\u06ED]/g, '').trim();
-};
-
-const loadVoices = () => {
-  if (!synth) return;
-  try {
-    const list = synth.getVoices() || [];
-    if (list.length > 0) {
-      cachedVoices = list;
-      voicesLoaded = true;
-    }
-  } catch (e) {
-    console.warn('Error loading voices:', e);
-  }
-};
-
-if (typeof window !== 'undefined' && synth) {
-  loadVoices();
-  if ('onvoiceschanged' in synth) {
-    synth.onvoiceschanged = () => {
-      loadVoices();
-    };
-  }
-}
-
-export const isSpeechSynthesisSupported = (): boolean => {
-  return typeof window !== 'undefined' && 'speechSynthesis' in window;
-};
-
-export const isSpeechRecognitionSupported = (): boolean => {
-  return (
-    typeof window !== 'undefined' &&
-    ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
-  );
-};
-
-let currentAudioElement: HTMLAudioElement | null = null;
-let currentAudioQueue: string[] = [];
-let currentAudioIndex = 0;
-let currentAudioOnEnd: (() => void) | null = null;
-let isAudioEnginePlaying = false;
-
-export const stopSpeaking = () => {
-  // 1. Immediately pause and reset HTML5 audio streaming
-  if (currentAudioElement) {
-    try {
-      currentAudioElement.pause();
-      currentAudioElement.currentTime = 0;
-      currentAudioElement.src = '';
-    } catch (e) {}
-    currentAudioElement = null;
-  }
-  currentAudioQueue = [];
-  currentAudioIndex = 0;
-  isAudioEnginePlaying = false;
-  if (currentAudioOnEnd) {
-    const cb = currentAudioOnEnd;
-    currentAudioOnEnd = null;
-    try {
-      cb();
-    } catch {}
-  }
-
-  // 2. Stop Web Speech API synthesis
-  if (synth) {
-    try {
-      synth.cancel();
-    } catch (e) {
-      console.warn('Error cancelling speech:', e);
-    }
-  }
-};
-
-// Notification sound deduplication state
-let lastChimePlayedAt = 0;
-const playedSoundEventIds = new Set<string>();
-
-export const isNotificationSoundEnabledInPrefs = (): boolean => {
-  if (typeof window === 'undefined') return true;
-  try {
-    const raw = localStorage.getItem('rk_notification_settings_v1');
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.soundEnabled === 'boolean') {
-        return parsed.soundEnabled;
-      }
-    }
-  } catch {}
-  return true;
-};
-
-/**
- * Generates a tiny in-memory WAV data URI for HTML5 <audio> fallback when Web Audio API is suspended.
- */
-function createFallbackWavDataUri(freq1 = 587.33, freq2 = 880, durationSec = 0.32): string {
-  const sampleRate = 8000;
-  const numSamples = Math.floor(sampleRate * durationSec);
-  const buffer = new ArrayBuffer(44 + numSamples * 2);
-  const view = new DataView(buffer);
-
-  const writeStr = (offset: number, str: string) => {
-    for (let i = 0; i < str.length; i++) {
-      view.setUint8(offset + i, str.charCodeAt(i));
-    }
+  const charMap: Record<string, string> = {
+    'آ': 'aa',
+    'ا': 'a',
+    'أ': 'a',
+    'إ': 'i',
+    'ب': 'b',
+    'پ': 'p',
+    'ت': 't',
+    'ٹ': 't',
+    'ث': 's',
+    'ج': 'j',
+    'چ': 'ch',
+    'ح': 'h',
+    'خ': 'kh',
+    'د': 'd',
+    'ڈ': 'd',
+    'ذ': 'z',
+    'ر': 'r',
+    'ڑ': 'r',
+    'ز': 'z',
+    'ژ': 'zh',
+    'س': 's',
+    'ش': 'sh',
+    'ص': 's',
+    'ض': 'z',
+    'ط': 't',
+    'ظ': 'z',
+    'ع': 'a',
+    'غ': 'gh',
+    'ف': 'f',
+    'ق': 'q',
+    'ک': 'k',
+    'ك': 'k',
+    'گ': 'g',
+    'ل': 'l',
+    'م': 'm',
+    'ن': 'n',
+    'ں': 'n',
+    'و': 'o',
+    'ؤ': 'o',
+    'ہ': 'h',
+    'ھ': 'h',
+    'ۃ': 'h',
+    'ء': '',
+    'ی': 'i',
+    'ے': 'ay',
+    'ئ': 'i',
+    '۰': '0',
+    '۱': '1',
+    '۲': '2',
+    '۳': '3',
+    '۴': '4',
+    '۵': '5',
+    '۶': '6',
+    '۷': '7',
+    '۸': '8',
+    '۹': '9',
+    '۔': '. ',
+    '،': ', ',
+    '؟': '? ',
   };
 
-  writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + numSamples * 2, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, sampleRate * 2, true);
-  view.setUint16(32, 2, true);
-  view.setUint16(34, 16, true);
-  writeStr(36, 'data');
-  view.setUint32(40, numSamples * 2, true);
-
-  for (let i = 0; i < numSamples; i++) {
-    const t = i / sampleRate;
-    const freq = t < durationSec * 0.45 ? freq1 : freq2;
-    const envelope = Math.max(0, 1 - t / durationSec);
-    const sample = Math.sin(2 * Math.PI * freq * t) * 0.35 * envelope;
-    view.setInt16(44 + i * 2, Math.floor(sample * 32767), true);
+  let finalOut = '';
+  for (const ch of result) {
+    if (charMap[ch] !== undefined) {
+      finalOut += charMap[ch];
+    } else if (/[\u064B-\u065F\u0670]/.test(ch)) {
+      // skip diacritics
+    } else {
+      finalOut += ch;
+    }
   }
 
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return 'data:audio/wav;base64,' + btoa(binary);
+  return finalOut.replace(/\s+/g, ' ').trim();
 }
 
-export const playNotificationChime = (
-  type: 'message' | 'alert' | 'start' | 'teacher' | 'chime' | 'success' = 'start',
-  options?: { eventId?: string; forcePlay?: boolean }
-): boolean => {
-  // Check user's sound preference for message/alert notifications unless explicitly forced (e.g., Test Sound button)
-  if ((type === 'message' || type === 'alert' || type === 'chime') && !options?.forcePlay) {
-    if (!isNotificationSoundEnabledInPrefs()) {
-      return false;
-    }
+function isLikelyFemaleVoice(v: SpeechSynthesisVoice): boolean {
+  const n = v.name.toLowerCase();
+  return (
+    n.includes('female') ||
+    n.includes('woman') ||
+    n.includes('girl') ||
+    n.includes('uzma') ||
+    n.includes('salma') ||
+    n.includes('sara') ||
+    n.includes('fatima') ||
+    n.includes('ayesha') ||
+    n.includes('heera') ||
+    n.includes('swara') ||
+    n.includes('kalpana') ||
+    n.includes('lekha') ||
+    n.includes('neerja') ||
+    n.includes('zira') ||
+    n.includes('samantha') ||
+    n.includes('victoria') ||
+    n.includes('karen') ||
+    n.includes('moira') ||
+    n.includes('tessa') ||
+    n.includes('veena')
+  );
+}
+
+function isExplicitlyMaleVoice(v: SpeechSynthesisVoice): boolean {
+  const n = v.name.toLowerCase();
+  return (
+    !isLikelyFemaleVoice(v) &&
+    (n.includes('male') ||
+      n.includes('man') ||
+      n.includes('asad') ||
+      n.includes('salman') ||
+      n.includes('imran') ||
+      n.includes('bilal') ||
+      n.includes('madhur') ||
+      n.includes('prabhat') ||
+      n.includes('hemant') ||
+      n.includes('ravi') ||
+      n.includes('david') ||
+      n.includes('mark') ||
+      n.includes('daniel') ||
+      n.includes('george') ||
+      n.includes('alex') ||
+      n.includes('james') ||
+      n.includes('richard'))
+  );
+}
+
+function getAssistantVoice(
+  lang: Language,
+  preferFemale = false
+): { voice: SpeechSynthesisVoice | null; isNativeUrdu: boolean; isSouthAsianScriptCapable: boolean } {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return { voice: null, isNativeUrdu: false, isSouthAsianScriptCapable: false };
   }
 
-  // Deduplicate by eventId so multiple listeners never trigger sound twice for the same message/notification
-  if (options?.eventId) {
-    if (playedSoundEventIds.has(options.eventId)) {
-      return false;
-    }
-    playedSoundEventIds.add(options.eventId);
-    if (playedSoundEventIds.size > 200) {
-      const firstKey = playedSoundEventIds.values().next().value;
-      if (firstKey) playedSoundEventIds.delete(firstKey);
-    }
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) {
+    return { voice: null, isNativeUrdu: false, isSouthAsianScriptCapable: false };
   }
 
-  // Throttle rapid duplicate notification chimes within 650ms
-  const nowMs = Date.now();
-  if ((type === 'message' || type === 'alert') && !options?.forcePlay) {
-    if (nowMs - lastChimePlayedAt < 650) {
-      return false;
+  const pickByGender = (pool: SpeechSynthesisVoice[]): SpeechSynthesisVoice | undefined => {
+    if (pool.length === 0) return undefined;
+    if (preferFemale) {
+      return pool.find((v) => isLikelyFemaleVoice(v)) || pool[0];
     }
-    lastChimePlayedAt = nowMs;
+    return (
+      pool.find((v) => isExplicitlyMaleVoice(v)) ||
+      pool.find((v) => !isLikelyFemaleVoice(v)) ||
+      pool[0]
+    );
+  };
+
+  if (lang === 'en') {
+    const enVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('en'));
+    return {
+      voice: pickByGender(enVoices) || voices[0] || null,
+      isNativeUrdu: false,
+      isSouthAsianScriptCapable: false,
+    };
   }
 
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioCtx) {
-      if (!sharedAudioCtx) {
-        sharedAudioCtx = new AudioCtx();
-      }
-      if (sharedAudioCtx.state === 'suspended') {
-        sharedAudioCtx.resume().catch(() => {});
-      }
+  // 1. Pakistani Urdu (`ur-PK`)
+  const urPkVoices = voices.filter((v) => {
+    const l = v.lang.toLowerCase().replace('_', '-');
+    const n = v.name.toLowerCase();
+    return l.includes('ur-pk') || (l.startsWith('ur') && n.includes('pakistan'));
+  });
+  const pickedUrPk = pickByGender(urPkVoices);
+  if (pickedUrPk) {
+    return { voice: pickedUrPk, isNativeUrdu: true, isSouthAsianScriptCapable: true };
+  }
 
-      if (sharedAudioCtx.state === 'running') {
-        const ctx = sharedAudioCtx;
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+  // 2. Any Urdu voice (`ur`, `ur-IN`, etc.)
+  const urVoices = voices.filter((v) => {
+    const l = v.lang.toLowerCase();
+    const n = v.name.toLowerCase();
+    return l.startsWith('ur') || n.includes('urdu');
+  });
+  const pickedUr = pickByGender(urVoices);
+  if (pickedUr) {
+    return { voice: pickedUr, isNativeUrdu: true, isSouthAsianScriptCapable: true };
+  }
 
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-
-        const now = ctx.currentTime;
-        if (type === 'message') {
-          osc.type = 'sine';
-          osc.frequency.setValueAtTime(587.33, now); // D5
-          osc.frequency.setValueAtTime(880, now + 0.12); // A5
-          gain.gain.setValueAtTime(0.24, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.42);
-          osc.start(now);
-          osc.stop(now + 0.42);
-        } else if (type === 'alert') {
-          osc.type = 'triangle';
-          osc.frequency.setValueAtTime(523.25, now);
-          osc.frequency.setValueAtTime(783.99, now + 0.12);
-          osc.frequency.setValueAtTime(1046.5, now + 0.24);
-          gain.gain.setValueAtTime(0.26, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.52);
-          osc.start(now);
-          osc.stop(now + 0.52);
-        } else if (type === 'teacher') {
-          osc.frequency.setValueAtTime(523.25, now); // C5
-          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
-          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
-          osc.frequency.setValueAtTime(1046.5, now + 0.24); // C6
-          gain.gain.setValueAtTime(0.18, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-          osc.start(now);
-          osc.stop(now + 0.5);
-        } else {
-          osc.frequency.setValueAtTime(523.25, now); // C5
-          osc.frequency.setValueAtTime(659.25, now + 0.08); // E5
-          osc.frequency.setValueAtTime(783.99, now + 0.16); // G5
-          gain.gain.setValueAtTime(0.18, now);
-          gain.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
-          osc.start(now);
-          osc.stop(now + 0.45);
-        }
-        return true;
-      }
-    }
-
-    // Fallback 1: HTML5 Audio element with synthesized WAV data URI
-    const wavUri =
-      type === 'alert'
-        ? createFallbackWavDataUri(523.25, 987.77, 0.36)
-        : createFallbackWavDataUri(587.33, 880, 0.32);
-    const fallbackAudio = new Audio(wavUri);
-    fallbackAudio.volume = 0.65;
-    fallbackAudio.play().catch(() => {
-      // Fallback 2: Gentle vibration on mobile devices if audio is blocked prior to user gesture
-      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-        try {
-          navigator.vibrate([120, 60, 120]);
-        } catch {}
-      }
+  // 3. Punjabi (`pa`) if requested
+  if (lang === 'pa') {
+    const paVoices = voices.filter((v) => {
+      const l = v.lang.toLowerCase();
+      const n = v.name.toLowerCase();
+      return l.startsWith('pa') || n.includes('punjabi');
     });
-    return true;
-  } catch (e) {
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate([120, 60, 120]);
-      } catch {}
+    const pickedPa = pickByGender(paVoices);
+    if (pickedPa) {
+      return { voice: pickedPa, isNativeUrdu: true, isSouthAsianScriptCapable: true };
     }
-    return false;
   }
-};
+
+  // 4. Arabic (`ar`) can read Arabic/Urdu script letters if installed
+  const arVoices = voices.filter((v) => v.lang.toLowerCase().startsWith('ar'));
+  const pickedAr = pickByGender(arVoices);
+  if (pickedAr) {
+    return { voice: pickedAr, isNativeUrdu: false, isSouthAsianScriptCapable: true };
+  }
+
+  return { voice: null, isNativeUrdu: false, isSouthAsianScriptCapable: false };
+}
 
 /**
- * Get available voices from browser
+ * Reports honest voice availability status including server-side neural TTS when configured.
  */
-export const getAvailableVoices = (): SpeechSynthesisVoice[] => {
-  if (!synth) return [];
-  if (!cachedVoices.length) {
-    loadVoices();
+export function getVoiceAvailabilityStatus(lang: Language = 'ur'): VoiceAvailabilityStatus {
+  if (cachedServerStatus.geminiConfigured) {
+    return {
+      supported: true,
+      hasNativeUrduVoice: true,
+      voiceName: 'Gemini 3.8 Flash Lite TTS (Puck / Kore / Charon / Zephyr)',
+      voiceLang: lang === 'en' ? 'en-US' : 'ur-PK',
+      mode: 'gemini_neural_tts',
+      statusMessageUrdu: 'گوگل جیمنائی پاکستانی اردو آواز فعال ہے (Gemini 3.8 TTS)',
+    };
   }
-  return cachedVoices.length ? cachedVoices : (synth.getVoices() || []);
-};
+  if (cachedServerStatus.azureSpeechConfigured) {
+    return {
+      supported: true,
+      hasNativeUrduVoice: true,
+      voiceName: 'Azure Neural (ur-PK-AsadNeural / ur-PK-UzmaNeural)',
+      voiceLang: 'ur-PK',
+      mode: 'azure_neural',
+      statusMessageUrdu: 'پاکستانی اردو نیورل آواز فعال ہے (ur-PK Neural Voice)',
+    };
+  }
+
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    return {
+      supported: false,
+      hasNativeUrduVoice: false,
+      voiceName: 'None',
+      voiceLang: '',
+      mode: 'unsupported',
+      statusMessageUrdu: 'آپ کے براؤزر میں آواز (Text-to-Speech) کی سہولت دستیاب نہیں ہے۔',
+    };
+  }
+
+  const voices = window.speechSynthesis.getVoices();
+  if (lang === 'en') {
+    const { voice } = getAssistantVoice('en');
+    return {
+      supported: true,
+      hasNativeUrduVoice: false,
+      voiceName: voice?.name || 'System English',
+      voiceLang: voice?.lang || 'en-US',
+      mode: 'english',
+      statusMessageUrdu: 'انگلش آواز فعال ہے (English Voice Active)',
+    };
+  }
+
+  const { voice, isNativeUrdu, isSouthAsianScriptCapable } = getAssistantVoice(lang);
+  if (voice && isNativeUrdu) {
+    return {
+      supported: true,
+      hasNativeUrduVoice: true,
+      voiceName: voice.name,
+      voiceLang: voice.lang,
+      mode: 'native_urdu',
+      statusMessageUrdu: `اردو آواز فعال ہے (${voice.lang})`,
+    };
+  }
+
+  if (voice && isSouthAsianScriptCapable) {
+    return {
+      supported: true,
+      hasNativeUrduVoice: false,
+      voiceName: voice.name,
+      voiceLang: voice.lang,
+      mode: 'south_asian_phonetic',
+      statusMessageUrdu: `متبادل آواز فعال ہے (${voice.lang})`,
+    };
+  }
+
+  const fallbackEn = voices.find((v) => v.lang.toLowerCase().startsWith('en')) || voices[0];
+  return {
+    supported: true,
+    hasNativeUrduVoice: false,
+    voiceName: fallbackEn?.name || 'System Default (Roman Urdu Fallback)',
+    voiceLang: fallbackEn?.lang || 'en-US',
+    mode: 'roman_transliteration',
+    statusMessageUrdu:
+      'آپ کے ڈیوائس میں اردو آواز انسٹال نہیں — رومن اردو اور انگلش تلفظ کے ذریعے مکمل جواب سنایا جا رہا ہے۔',
+  };
+}
 
 /**
- * Split long Urdu sentences into natural phrases for high-fidelity audio streaming.
+ * Speaks a text string using language-aware segment queues so Urdu and English parts
+ * each receive their proper pronunciation and voice without mid-sentence cutoff.
  */
-export const splitTextIntoUrduChunks = (text: string, maxLen = 140): string[] => {
-  const clean = text.replace(/\s+/g, ' ').trim();
-  if (!clean) return [];
-  if (clean.length <= maxLen) return [clean];
+function speakViaWebSpeech(
+  cleanText: string,
+  requestedLang: Language,
+  onEnd?: () => void,
+  options?: SpeakOptions,
+  sessionId?: number
+): void {
+  if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
+    isSpeechCurrentlyPlaying = false;
+    isSpeechCurrentlyPaused = false;
+    notifySpeechStateChange();
+    if (options?.onError) {
+      options.onError('آپ کے براؤزر میں آواز کی سہولت موجود نہیں ہے۔');
+    }
+    if (onEnd) onEnd();
+    return;
+  }
 
-  // Split by natural pause markers (full stops, exclamation, question marks, commas, newlines)
-  const parts = clean.split(/([۔!؟\n]+|[،,]+)/g);
-  const chunks: string[] = [];
-  let buffer = '';
+  const executeSpeak = () => {
+    if (sessionId !== undefined && sessionId !== activeSpeakSessionId) {
+      return;
+    }
 
-  for (let i = 0; i < parts.length; i++) {
-    const p = parts[i];
-    if (!p) continue;
-    if ((buffer + ' ' + p).trim().length <= maxLen) {
-      buffer = (buffer + ' ' + p).trim();
-    } else {
-      if (buffer.trim()) chunks.push(buffer.trim());
-      if (p.length <= maxLen) {
-        buffer = p.trim();
-      } else {
-        // Break long words sequence
-        const words = p.split(' ');
-        for (const w of words) {
-          if ((buffer + ' ' + w).trim().length <= maxLen) {
-            buffer = (buffer + ' ' + w).trim();
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+    activeUtterances.length = 0;
+
+    const preferFemale =
+      options?.voiceGender === 'female' || Boolean(options?.isFemaleVillageVoice);
+
+    // Split into sentences first, then split mixed-language sentences into language-tagged segments
+    const rawSentences = splitTextIntoUrduChunks(cleanText, 150);
+    const playbackQueue: Array<{
+      displaySegment: string;
+      spokenChunk: string;
+      targetLangTag: string;
+      selectedVoice: SpeechSynthesisVoice | null;
+    }> = [];
+
+    const allVoices = window.speechSynthesis.getVoices();
+
+    for (const sentence of rawSentences) {
+      const langSegments = splitMixedLanguageSegments(sentence, requestedLang);
+      for (const seg of langSegments) {
+        if (!seg.text.trim()) continue;
+
+        if (seg.lang === 'en') {
+          const { voice: enVoice } = getAssistantVoice('en', preferFemale);
+          playbackQueue.push({
+            displaySegment: sentence,
+            spokenChunk: seg.text,
+            targetLangTag: enVoice?.lang || 'en-US',
+            selectedVoice: enVoice,
+          });
+        } else {
+          const { voice: urVoice, isSouthAsianScriptCapable } = getAssistantVoice(
+            seg.lang,
+            preferFemale
+          );
+          if (urVoice && isSouthAsianScriptCapable) {
+            playbackQueue.push({
+              displaySegment: sentence,
+              spokenChunk: convertTextToPakistaniUrduPhonetics(seg.text),
+              targetLangTag: urVoice.lang || (seg.lang === 'pa' ? 'pa-PK' : 'ur-PK'),
+              selectedVoice: urVoice,
+            });
+          } else if (allVoices.length > 0) {
+            const enFallback = getAssistantVoice('en', preferFemale).voice || allVoices[0];
+            playbackQueue.push({
+              displaySegment: sentence,
+              spokenChunk: transliterateUrduScriptToRoman(
+                convertTextToPakistaniUrduPhonetics(seg.text)
+              ),
+              targetLangTag: enFallback?.lang || 'en-US',
+              selectedVoice: enFallback,
+            });
           } else {
-            if (buffer.trim()) chunks.push(buffer.trim());
-            buffer = w;
+            playbackQueue.push({
+              displaySegment: sentence,
+              spokenChunk: convertTextToPakistaniUrduPhonetics(seg.text),
+              targetLangTag: seg.lang === 'pa' ? 'pa-PK' : 'ur-PK',
+              selectedVoice: null,
+            });
           }
         }
       }
     }
+
+    if (playbackQueue.length === 0) {
+      isSpeechCurrentlyPlaying = false;
+      isSpeechCurrentlyPaused = false;
+      notifySpeechStateChange();
+      if (onEnd) onEnd();
+      return;
+    }
+
+    isSpeechCurrentlyPlaying = true;
+    isSpeechCurrentlyPaused = false;
+    notifySpeechStateChange();
+
+    let currentIndex = 0;
+
+    const speakNext = () => {
+      if (sessionId !== undefined && sessionId !== activeSpeakSessionId) {
+        return;
+      }
+      if (currentIndex >= playbackQueue.length) {
+        activeUtterances.length = 0;
+        isSpeechCurrentlyPlaying = false;
+        isSpeechCurrentlyPaused = false;
+        notifySpeechStateChange();
+        if (onEnd) onEnd();
+        return;
+      }
+
+      const item = playbackQueue[currentIndex];
+      const itemIdx = currentIndex;
+      currentIndex += 1;
+
+      if (options?.onSegmentChange) {
+        try {
+          options.onSegmentChange(item.displaySegment, itemIdx, playbackQueue.length);
+        } catch {
+          // ignore
+        }
+      }
+
+      const utterance = new SpeechSynthesisUtterance(item.spokenChunk);
+      activeUtterances.push(utterance);
+
+      utterance.lang = item.targetLangTag;
+      if (item.selectedVoice) {
+        utterance.voice = item.selectedVoice;
+      }
+
+      const targetRate = getSpeechRate(options?.rate);
+      const isCurrentlyFemale = item.selectedVoice
+        ? isLikelyFemaleVoice(item.selectedVoice)
+        : false;
+
+      utterance.rate = targetRate;
+      if (preferFemale) {
+        utterance.pitch = options?.pitch ?? 1.05;
+      } else {
+        utterance.pitch = options?.pitch ?? (isCurrentlyFemale ? 0.88 : 1.0);
+      }
+      utterance.volume = options?.volume ?? 1.0;
+
+      utterance.onend = () => {
+        const idx = activeUtterances.indexOf(utterance);
+        if (idx !== -1) activeUtterances.splice(idx, 1);
+        speakNext();
+      };
+
+      utterance.onerror = (ev) => {
+        const idx = activeUtterances.indexOf(utterance);
+        if (idx !== -1) activeUtterances.splice(idx, 1);
+        if (ev.error === 'interrupted' || ev.error === 'canceled') {
+          return;
+        }
+        speakNext();
+      };
+
+      try {
+        if (window.speechSynthesis.paused) {
+          window.speechSynthesis.resume();
+        }
+        window.speechSynthesis.speak(utterance);
+      } catch {
+        speakNext();
+      }
+    };
+
+    speakNext();
+  };
+
+  const voices = window.speechSynthesis.getVoices();
+  if (voices.length === 0) {
+    let fired = false;
+    const handleVoicesChanged = () => {
+      if (fired) return;
+      fired = true;
+      window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+      executeSpeak();
+    };
+    window.speechSynthesis.addEventListener('voiceschanged', handleVoicesChanged);
+    setTimeout(() => {
+      if (!fired) {
+        fired = true;
+        window.speechSynthesis.removeEventListener('voiceschanged', handleVoicesChanged);
+        executeSpeak();
+      }
+    }, 250);
+  } else {
+    executeSpeak();
   }
-  if (buffer.trim()) chunks.push(buffer.trim());
-  return chunks.length ? chunks : [clean];
-};
-
-const FEMALE_VOICE_NAME_KEYWORDS = [
-  'female',
-  'zira',
-  'uzma',
-  'salma',
-  'swara',
-  'kalpana',
-  'heera',
-  'sabina',
-  'samantha',
-  'victoria',
-  'veena',
-  'lekha',
-  'neerja',
-];
-
-const MALE_VOICE_NAME_KEYWORDS = [
-  'asad',
-  'male',
-  'hemant',
-  'madhur',
-  'salman',
-  'fahad',
-  'hamza',
-  'bilal',
-  'prabhat',
-  'ravi',
-];
-
-export const isClearlyFemaleVoice = (voice: SpeechSynthesisVoice): boolean => {
-  const n = (voice.name || '').toLowerCase();
-  const uri = (voice.voiceURI || '').toLowerCase();
-  return FEMALE_VOICE_NAME_KEYWORDS.some((kw) => n.includes(kw) || uri.includes(kw));
-};
-
-export const isSuggestedMaleVoice = (voice: SpeechSynthesisVoice): boolean => {
-  if (isClearlyFemaleVoice(voice)) return false;
-  const n = (voice.name || '').toLowerCase();
-  const uri = (voice.voiceURI || '').toLowerCase();
-  return MALE_VOICE_NAME_KEYWORDS.some((kw) => n.includes(kw) || uri.includes(kw));
-};
+}
 
 /**
- * PART D1 & D2: Central function getAssistantVoice() in src/utils/speech.ts
- * Selects the best energetic ~40yo Pakistani male voice from browser speechSynthesis:
- * 1. An Urdu (ur-PK or ur-IN) voice whose name suggests a male voice ("Asad", "Male", "Hemant", "Madhur", etc.)
- * 2. Any ur voice that is not clearly female
- * 3. A Punjabi (pa) or Hindi (hi) male voice if no Urdu male voice exists on the device
- * 4. Any available Urdu voice (excluding female voices if any non-female option exists)
- * Never picks a voice whose name contains "female", "zira", "uzma", "salma", "swara", "kalpana".
+ * Attempts online neural TTS (`/api/ai/tts` — Azure `ur-PK-AsadNeural`/`ur-PK-UzmaNeural` or
+ * Google Gemini `gemini-3.8-flash-lite-tts`), falling back to language-aware segmented Web Speech
+ * if the backend neural service is unconfigured or offline.
  */
-export const getAssistantVoice = (lang: Language = 'ur'): SpeechSynthesisVoice | undefined => {
-  const voices = getAvailableVoices();
-  if (!voices.length) return undefined;
-
-  const nonFemaleVoices = voices.filter((v) => !isClearlyFemaleVoice(v));
-
-  if (lang === 'en') {
-    return (
-      nonFemaleVoices.find(
-        (v) => v.lang.toLowerCase().startsWith('en') && isSuggestedMaleVoice(v)
-      ) ||
-      nonFemaleVoices.find((v) => v.lang.toLowerCase().startsWith('en')) ||
-      nonFemaleVoices[0]
-    );
-  }
-
-  // Priority 1: Urdu (ur-PK or ur-IN or ur*) voice whose name suggests a male voice
-  const urduMale = nonFemaleVoices.find((v) => {
-    const l = v.lang.toLowerCase();
-    return (l === 'ur-pk' || l === 'ur-in' || l.startsWith('ur')) && isSuggestedMaleVoice(v);
-  });
-  if (urduMale) return urduMale;
-
-  // Priority 2: Any ur voice that is not clearly female (prefer ur-PK first)
-  const urduPkNotFemale = nonFemaleVoices.find((v) => v.lang.toLowerCase() === 'ur-pk');
-  if (urduPkNotFemale) return urduPkNotFemale;
-
-  const urduAnyNotFemale = nonFemaleVoices.find((v) => v.lang.toLowerCase().startsWith('ur'));
-  if (urduAnyNotFemale) return urduAnyNotFemale;
-
-  // Priority 3: Punjabi (pa) or Hindi (hi) male voice if no Urdu male voice exists on the device
-  const punjabiOrHindiMale = nonFemaleVoices.find((v) => {
-    const l = v.lang.toLowerCase();
-    return (l.startsWith('pa') || l.startsWith('hi')) && isSuggestedMaleVoice(v);
-  });
-  if (punjabiOrHindiMale) return punjabiOrHindiMale;
-
-  const punjabiOrHindiNotFemale = nonFemaleVoices.find((v) => {
-    const l = v.lang.toLowerCase();
-    return l.startsWith('pa') || l.startsWith('hi');
-  });
-  if (punjabiOrHindiNotFemale) return punjabiOrHindiNotFemale;
-
-  // Priority 4: Any available non-female voice for South Asia (PK / IN)
-  const regionMale = nonFemaleVoices.find((v) => {
-    const l = v.lang.toLowerCase();
-    return l.includes('pk') || l.includes('in');
-  });
-  if (regionMale) return regionMale;
-
-  return nonFemaleVoices[0];
-};
-
-/**
- * PART D5: Optional server voice helper (useServerVoice = false by default).
- * Calls a server / Cloud Function endpoint (/api/tts) for ur-PK-AsadNeural without any API key in frontend code.
- */
-async function trySpeakViaOptionalServerEndpoint(
+async function trySpeakViaOnlineNeuralTts(
   cleanText: string,
-  rate: number,
-  onEnd?: () => void
+  lang: Language,
+  sessionId: number,
+  onEnd?: () => void,
+  options?: SpeakOptions
 ): Promise<boolean> {
-  if (!getUseServerVoice()) return false;
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return false;
+
+  if (!cachedServerStatus.checked) {
+    await checkOnlineVoiceProviderStatus();
+  }
+  if (!cachedServerStatus.azureSpeechConfigured && !cachedServerStatus.geminiConfigured) {
+    return false;
+  }
+
+  const gender: 'male' | 'female' =
+    options?.voiceGender === 'female' || options?.isFemaleVillageVoice ? 'female' : 'male';
+  const rate = getSpeechRate(options?.rate);
+  const slowMode = getGlobalSpeechSlowMode() || rate < 0.86;
+  const cacheKey = `${lang}:${gender}:${slowMode ? 'slow' : 'norm'}:${cleanText}`;
+
   try {
-    const response = await fetch('/api/tts', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: cleanText,
-        voice: 'ur-PK-AsadNeural',
-        rate,
-        pitch: DEFAULT_MALE_ASSISTANT_PITCH,
-      }),
-    });
-    if (!response.ok) return false;
-    const blob = await response.blob();
-    if (!blob || blob.size === 0) return false;
-    const audioUrl = URL.createObjectURL(blob);
-    const audio = new Audio(audioUrl);
-    currentAudioElement = audio;
-    audio.playbackRate = Math.max(0.85, Math.min(1.4, rate));
+    let dataUrl = clientAudioDataCache.get(cacheKey);
+    if (!dataUrl) {
+      const response = await fetch('/api/ai/tts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: cleanText,
+          lang,
+          gender,
+          rate,
+          slowMode,
+        }),
+      });
+      if (!response.ok) return false;
+      const data = await response.json();
+      if (!data?.ok || !data?.audioBase64) return false;
+      const mime = data.mimeType || 'audio/wav';
+      dataUrl = `data:${mime};base64,${data.audioBase64}`;
+      clientAudioDataCache.set(cacheKey, dataUrl);
+    }
+
+    if (sessionId !== activeSpeakSessionId) {
+      return true; // Interrupted while fetching
+    }
+
+    const audio = new Audio(dataUrl);
+    activeAudioElement = audio;
+    audio.playbackRate = slowMode ? 0.92 : 1.0;
+    audio.volume = options?.volume ?? 1.0;
+
+    isSpeechCurrentlyPlaying = true;
+    isSpeechCurrentlyPaused = false;
+    notifySpeechStateChange();
+
+    if (options?.onSegmentChange) {
+      options.onSegmentChange(cleanText, 0, 1);
+    }
+
     audio.onended = () => {
-      URL.revokeObjectURL(audioUrl);
+      if (activeAudioElement === audio) {
+        activeAudioElement = null;
+      }
+      isSpeechCurrentlyPlaying = false;
+      isSpeechCurrentlyPaused = false;
+      notifySpeechStateChange();
       if (onEnd) onEnd();
     };
+
     audio.onerror = () => {
-      URL.revokeObjectURL(audioUrl);
-      if (onEnd) onEnd();
+      if (activeAudioElement === audio) {
+        activeAudioElement = null;
+      }
+      // Fall back to segmented Web Speech if audio element fails
+      speakViaWebSpeech(cleanText, lang, onEnd, options, sessionId);
     };
+
     await audio.play();
     return true;
   } catch {
@@ -717,478 +1393,612 @@ async function trySpeakViaOptionalServerEndpoint(
 }
 
 /**
- * Web Speech API engine using the ~40yo energetic Pakistani male voice (getAssistantVoice)
+ * Speaks a text string aloud in clear Urdu, Punjabi, English, or mixed Urdu-English.
+ * Automatically uses server-side neural TTS (Azure `ur-PK-AsadNeural`/`ur-PK-UzmaNeural` or
+ * Gemini `gemini-3.8-flash-lite-tts`) when configured, or language-aware segmented Web Speech.
  */
-export const speakViaWebSpeech = (
-  cleanText: string,
+export function speakText(
+  text: string,
   lang: Language = 'ur',
   onEnd?: () => void,
-  options?: {
-    isFemaleVillageVoice?: boolean;
-    voiceGender?: 'female' | 'male';
-    rate?: number;
-    pitch?: number;
-    volume?: number;
-  }
-) => {
-  if (!synth) {
+  options?: SpeakOptions
+): void {
+  if (typeof window === 'undefined') {
     if (onEnd) onEnd();
     return;
   }
 
-  const executeSpeak = () => {
-    if (!synth) {
-      if (onEnd) onEnd();
-      return;
-    }
-    try {
-      synth.cancel();
-      if (synth.paused) {
-        synth.resume();
-      }
-
-      const targetVoice = getAssistantVoice(lang);
-      const isTargetUrduOrSouthAsian =
-        targetVoice &&
-        (targetVoice.lang.toLowerCase().startsWith('ur') ||
-          targetVoice.lang.toLowerCase().startsWith('pa') ||
-          targetVoice.lang.toLowerCase().startsWith('hi'));
-
-      // Intelligible phonetic Roman Urdu fallback ONLY if device has neither Urdu nor Punjabi/Hindi voice
-      const textToSpeak =
-        lang === 'en' || isTargetUrduOrSouthAsian ? cleanText : urduToRomanUrdu(cleanText);
-
-      const utterance = new SpeechSynthesisUtterance(textToSpeak);
-      if (targetVoice) {
-        utterance.voice = targetVoice;
-        utterance.lang = targetVoice.lang;
-      } else {
-        utterance.lang = lang === 'en' ? 'en-US' : 'ur-PK';
-      }
-
-      // Energetic ~40yo Pakistani male voice: rate ~1.02 (or user's saved speed), pitch ~0.82
-      const effectiveRate = options?.rate ?? (lang === 'en' ? 1.0 : getSpeechRate());
-      const effectivePitch =
-        options?.pitch && options.pitch < 0.95
-          ? options.pitch
-          : DEFAULT_MALE_ASSISTANT_PITCH;
-
-      utterance.rate = Math.max(0.75, Math.min(1.6, effectiveRate));
-      utterance.pitch = effectivePitch;
-      utterance.volume = options?.volume ?? 1.0;
-
-      let finished = false;
-      const finishHandler = () => {
-        if (!finished) {
-          finished = true;
-          if (onEnd) onEnd();
-        }
-      };
-
-      utterance.onend = finishHandler;
-      utterance.onerror = () => finishHandler();
-
-      synth.speak(utterance);
-    } catch (err) {
-      console.warn('Web speech fallback failed:', err);
-      if (onEnd) onEnd();
-    }
-  };
-
-  // Wait for speechSynthesis.onvoiceschanged if voices have not populated yet (Android Chrome)
-  if (!voicesLoaded && (!cachedVoices || cachedVoices.length === 0)) {
-    loadVoices();
-    if (!cachedVoices.length && 'onvoiceschanged' in synth) {
-      let triggered = false;
-      const runOnce = () => {
-        if (triggered) return;
-        triggered = true;
-        loadVoices();
-        executeSpeak();
-      };
-      synth.addEventListener?.('voiceschanged', runOnce, { once: true });
-      setTimeout(runOnce, 250);
-      return;
-    }
-  }
-
-  executeSpeak();
-};
-
-/**
- * Universal Speak Text in Clear Pakistani Urdu (Energetic ~40yo Male Voice)
- * - Uses browser male voice via getAssistantVoice() first when available so pitch (0.82) & male voice selection are guaranteed.
- * - If useServerVoice is enabled (Part D5), tries the optional server endpoint (/api/tts) first and silently falls back.
- */
-export const speakText = (
-  text: string,
-  lang: Language = 'ur',
-  onEnd?: () => void,
-  options?: {
-    isFemaleVillageVoice?: boolean;
-    voiceGender?: 'female' | 'male';
-    rate?: number;
-    pitch?: number;
-    volume?: number;
-  }
-): boolean => {
-  // Pre-unlock audio engine for mobile Safari, Android Chrome, and laptops
-  unlockAudioContext();
-
-  // Stop any prior speech or audio playback cleanly
   stopSpeaking();
+  const currentSessionId = ++activeSpeakSessionId;
 
-  let cleanText = cleanSpeechText(text);
-
-  // If Urdu or Punjabi, convert numbers, times, and terms into natural Pakistani Urdu words
-  if (lang === 'ur' || lang === 'pa') {
-    cleanText = convertTextToPakistaniUrduPhonetics(cleanText);
-  }
-
+  const cleanText = cleanSpeechText(text);
   if (!cleanText) {
     if (onEnd) onEnd();
-    return false;
+    return;
   }
 
-  const effectiveRate = options?.rate ?? getSpeechRate();
-  const maleOptions = {
-    ...options,
-    isFemaleVillageVoice: false,
-    voiceGender: 'male' as const,
-    rate: effectiveRate,
-    pitch:
-      options?.pitch && options.pitch < 0.95
-        ? options.pitch
-        : DEFAULT_MALE_ASSISTANT_PITCH,
-  };
-
-  // Optional Server Voice (Part D5 - default false; falls back silently if disabled or fails)
-  if (getUseServerVoice()) {
-    trySpeakViaOptionalServerEndpoint(cleanText, effectiveRate, onEnd).then((played) => {
-      if (!played) {
-        speakViaWebSpeech(cleanText, lang, onEnd, maleOptions);
+  if (options?.preferOnlineNeural !== false) {
+    trySpeakViaOnlineNeuralTts(cleanText, lang, currentSessionId, onEnd, options).then(
+      (handledByNeural) => {
+        if (!handledByNeural && currentSessionId === activeSpeakSessionId) {
+          speakViaWebSpeech(cleanText, lang, onEnd, options, currentSessionId);
+        }
       }
-    });
-    return true;
+    );
+  } else {
+    speakViaWebSpeech(cleanText, lang, onEnd, options, currentSessionId);
   }
-
-  // Free browser speech synthesis using getAssistantVoice() with pitch 0.82 & rate 1.02
-  speakViaWebSpeech(cleanText, lang, onEnd, maleOptions);
-  return true;
-};
+}
 
 /**
- * Polite Spoken Text Builders for Illiterate or Elderly Villagers
+ * Speaks a sequence of counting items (e.g., 1 to 10) in exact order with visual highlighting,
+ * optional slow repetition for young children, and immediate cancellation support.
  */
-export const formatSpokenCardText = (p: {
+export function speakSequentialCounting(
+  items: Array<{ id: string; text: string; lang: Language }>,
+  options: {
+    repeatEach?: boolean;
+    slowMode?: boolean;
+    voiceGender?: 'male' | 'female';
+    onItemStart?: (id: string, index: number) => void;
+    onComplete?: () => void;
+  } = {}
+): void {
+  stopSpeaking();
+  const sessionId = activeSpeakSessionId;
+  if (!items || items.length === 0) {
+    if (options.onComplete) options.onComplete();
+    return;
+  }
+
+  let currentIdx = 0;
+  let repeatPass = 0;
+  const maxPasses = options.repeatEach ? 2 : 1;
+
+  const playNextItem = () => {
+    if (sessionId !== activeSpeakSessionId) {
+      return;
+    }
+    if (currentIdx >= items.length) {
+      if (options.onComplete) options.onComplete();
+      return;
+    }
+
+    const currentItem = items[currentIdx];
+    if (options.onItemStart) {
+      options.onItemStart(currentItem.id, currentIdx);
+    }
+
+    const rate = options.slowMode ? 0.78 : getSpeechRate();
+
+    speakViaWebSpeech(
+      currentItem.text,
+      currentItem.lang,
+      () => {
+        if (sessionId !== activeSpeakSessionId) return;
+        repeatPass += 1;
+        if (repeatPass < maxPasses) {
+          setTimeout(() => {
+            if (sessionId === activeSpeakSessionId) playNextItem();
+          }, 350);
+        } else {
+          repeatPass = 0;
+          currentIdx += 1;
+          setTimeout(() => {
+            if (sessionId === activeSpeakSessionId) playNextItem();
+          }, 420);
+        }
+      },
+      {
+        voiceGender: options.voiceGender || 'male',
+        rate,
+      },
+      sessionId
+    );
+  };
+
+  playNextItem();
+}
+
+/**
+ * Pauses active speech playback (if currently speaking).
+ */
+export function pauseSpeaking(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (activeAudioElement && !activeAudioElement.paused) {
+      activeAudioElement.pause();
+      isSpeechCurrentlyPaused = true;
+      notifySpeechStateChange();
+    }
+    if ('speechSynthesis' in window && window.speechSynthesis.speaking && !window.speechSynthesis.paused) {
+      window.speechSynthesis.pause();
+      isSpeechCurrentlyPaused = true;
+      notifySpeechStateChange();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Resumes paused speech playback.
+ */
+export function resumeSpeaking(): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (activeAudioElement && activeAudioElement.paused) {
+      activeAudioElement.play().catch(() => {});
+      isSpeechCurrentlyPaused = false;
+      isSpeechCurrentlyPlaying = true;
+      notifySpeechStateChange();
+    }
+    if ('speechSynthesis' in window && window.speechSynthesis.paused) {
+      window.speechSynthesis.resume();
+      isSpeechCurrentlyPaused = false;
+      isSpeechCurrentlyPlaying = true;
+      notifySpeechStateChange();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * Stops any active speech playback immediately and clears queued chunks.
+ */
+export function stopSpeaking(): void {
+  activeSpeakSessionId++;
+  activeUtterances.length = 0;
+  isSpeechCurrentlyPlaying = false;
+  isSpeechCurrentlyPaused = false;
+  notifySpeechStateChange();
+
+  if (activeAudioElement) {
+    try {
+      activeAudioElement.pause();
+      activeAudioElement.src = '';
+    } catch {
+      // ignore
+    }
+    activeAudioElement = null;
+  }
+  if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+/**
+ * Generates an easy-to-understand spoken Urdu sentence for any profile/item card
+ */
+export function formatSpokenCardText(params: {
   name: string;
   fatherName?: string;
   businessName: string;
-  address?: string;
+  address: string;
   rateInfo?: string;
   mobile: string;
   timingInfo?: string;
   breakInfo?: string;
   statusInfo?: string;
-}): string => {
-  const cleanPhone = (p.mobile || '').replace(/[-]/g, ' ');
-  return [
-    `یہ رتہ کلاں کے ہنر مند ہیں: ${p.name}۔`,
-    p.fatherName ? `ولد ${p.fatherName}۔` : '',
-    `کاروبار: ${p.businessName}۔`,
-    p.timingInfo ? `اوقاتِ کار: ${p.timingInfo}۔` : '',
-    p.breakInfo ? `وقفہ: ${p.breakInfo}۔` : '',
-    p.statusInfo ? `موجودہ صورتحال: ${p.statusInfo}۔` : '',
-    p.rateInfo ? `ریٹ یا مزدوری: ${p.rateInfo}۔` : '',
-    p.address ? `پتہ: ${p.address}۔` : 'مقام: رتہ کلاں جھنگ۔',
-    `موبائل نمبر ہے: ${cleanPhone}۔`,
-    'رابطہ کرنے کے لیے کال یا واٹس ایپ کا بٹن دبائیں۔',
-  ]
-    .filter(Boolean)
-    .join(' ');
-};
+}): string {
+  const parts: string[] = [];
+  if (params.fatherName) {
+    parts.push(`نام: ${params.name} ولد ${params.fatherName}۔`);
+  } else {
+    parts.push(`نام: ${params.name}۔`);
+  }
+  parts.push(`کاروبار یا خدمت: ${params.businessName}۔`);
+  if (params.statusInfo) {
+    parts.push(`حالت: ${params.statusInfo}۔`);
+  }
+  if (params.timingInfo) {
+    parts.push(`اوقاتِ کار: ${params.timingInfo}۔`);
+  }
+  if (params.breakInfo) {
+    parts.push(`کھانے اور نماز کا وقفہ: ${params.breakInfo}۔`);
+  }
+  parts.push(`پتہ: ${params.address}۔`);
+  if (params.rateInfo) {
+    parts.push(`ریٹ اور تفصیل: ${params.rateInfo}۔`);
+  }
+  parts.push(`فون نمبر: ${params.mobile}۔`);
+  return parts.join(' ');
+}
 
-export const formatSpokenMosqueText = (m: {
+export function setSpeechRate(rate: number): void {
+  setGlobalSpeechSlowMode(rate < 0.85);
+}
+
+export function formatSpokenMosqueText(mosque: {
   name: string;
-  imamName?: string;
-  location?: string;
-  prayerTimes?: {
-    fajr?: string;
-    dhuhr?: string;
-    asr?: string;
-    maghrib?: string;
-    isha?: string;
-    jummah?: string;
+  imamName: string;
+  location: string;
+  contact?: string;
+  contactNumber?: string;
+  prayerTimes: {
+    fajr: string;
+    dhuhr: string;
+    asr: string;
+    maghrib: string;
+    isha: string;
+    jummah: string;
   };
-  fajr?: string;
-  dhuhr?: string;
-  asr?: string;
-  maghrib?: string;
-  isha?: string;
-  jummah?: string;
-}): string => {
-  const fajr = m.prayerTimes?.fajr || m.fajr;
-  const dhuhr = m.prayerTimes?.dhuhr || m.dhuhr;
-  const asr = m.prayerTimes?.asr || m.asr;
-  const maghrib = m.prayerTimes?.maghrib || m.maghrib;
-  const isha = m.prayerTimes?.isha || m.isha;
-  const jummah = m.prayerTimes?.jummah || m.jummah;
+}): string {
+  const phone = mosque.contact || mosque.contactNumber || '';
+  return `مسجد کا نام: ${mosque.name}۔ امام صاحب: ${mosque.imamName}۔ مقام: ${mosque.location}۔ نماز کے اوقات: فجر ${mosque.prayerTimes.fajr}، ظہر ${mosque.prayerTimes.dhuhr}، عصر ${mosque.prayerTimes.asr}، مغرب ${mosque.prayerTimes.maghrib}، عشاء ${mosque.prayerTimes.isha}، جمعہ ${mosque.prayerTimes.jummah}۔${phone ? ` فون نمبر: ${phone}۔` : ''}`;
+}
 
-  return [
-    `یہ ہے: ${m.name}۔`,
-    m.imamName ? `خطیب و امام صاحب: ${m.imamName}۔` : '',
-    m.location ? `مقام: ${m.location}۔` : '',
-    'نماز کے اوقات یہ ہیں:',
-    fajr ? `فجر: ${fajr}۔` : '',
-    dhuhr ? `ظہر: ${dhuhr}۔` : '',
-    asr ? `عصر: ${asr}۔` : '',
-    maghrib ? `مغرب: ${maghrib}۔` : '',
-    isha ? `عشاء: ${isha}۔` : '',
-    jummah ? `نمازِ جمعہ: ${jummah}۔` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-};
-
-export const formatSpokenInstituteText = (inst: {
+export function formatSpokenInstituteText(inst: {
   name: string;
-  headName?: string;
-  location?: string;
-  classesOffered?: string;
-  timing?: string;
-}): string => {
-  return [
-    `یہ تعلیمی ادارہ ہے: ${inst.name}۔`,
-    inst.headName ? `پرنسپل یا ہیڈ ماسٹر: ${inst.headName}۔` : '',
-    inst.classesOffered ? `کلاسیں: ${inst.classesOffered}۔` : '',
-    inst.timing ? `اوقات: ${inst.timing}۔` : '',
-    inst.location ? `مقام: ${inst.location}۔` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-};
+  headName: string;
+  location: string;
+  classesOffered: string;
+  timing: string;
+  contact?: string;
+  contactNumber?: string;
+}): string {
+  const phone = inst.contact || inst.contactNumber || '';
+  return `تعلیمی ادارہ: ${inst.name}۔ سربراہ: ${inst.headName}۔ مقام: ${inst.location}۔ کلاسیں: ${inst.classesOffered}۔ اوقات: ${inst.timing}۔${phone ? ` فون نمبر: ${phone}۔` : ''}`;
+}
 
-export const formatSpokenTransportText = (v: {
+export function formatSpokenTransportText(trans: {
   title: string;
-  driverName?: string;
-  driverMobile?: string;
-  route?: string;
-  rent?: string;
-  fare?: string;
-  departureTime?: string;
-}): string => {
-  const fare = v.fare || v.rent;
-  const cleanPhone = (v.driverMobile || '').replace(/[-]/g, ' ');
-  return [
-    `یہ رتہ کلاں پبلک ٹرانسپورٹ ہے: ${v.title}۔`,
-    v.driverName ? `ڈرائیور صاحب: ${v.driverName}۔` : '',
-    v.route ? `روٹ: ${v.route}۔` : '',
-    v.departureTime ? `روانگی کا وقت: ${v.departureTime}۔` : '',
-    fare ? `کرایہ: ${fare}۔` : '',
-    cleanPhone ? `ڈرائیور کا رابطہ نمبر: ${cleanPhone}۔` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-};
+  vehicleNumber?: string;
+  driverName: string;
+  driverMobile: string;
+  route: string;
+  departureTime: string;
+  arrivalTime?: string;
+  fare: string;
+}): string {
+  return `گاڑی: ${trans.title}${trans.vehicleNumber ? `، نمبر ${trans.vehicleNumber}` : ''}۔ ڈرائیور: ${trans.driverName}۔ روٹ: ${trans.route}۔ روانگی کا وقت: ${trans.departureTime}۔ کرایہ: ${trans.fare}۔ فون نمبر: ${trans.driverMobile}۔`;
+}
 
-export const formatSpokenHospitalText = (h: {
+export function formatSpokenHospitalText(hosp: {
   name: string;
   categoryUrdu?: string;
-  address?: string;
+  address: string;
   distance?: string;
-  timing?: string;
-  contact?: string;
-}): string => {
-  const cleanPhone = (h.contact || '').replace(/[-]/g, ' ');
-  return [
-    `یہ طبی سروس ہے: ${h.name}۔`,
-    h.categoryUrdu ? `قسم: ${h.categoryUrdu}۔` : '',
-    h.address ? `پتہ: ${h.address}۔` : '',
-    h.distance ? `فاصلہ: ${h.distance}۔` : '',
-    h.timing ? `اوقات: ${h.timing}۔` : '',
-    cleanPhone ? `ایمرجنسی رابطہ نمبر: ${cleanPhone}۔` : '',
-  ]
-    .filter(Boolean)
-    .join(' ');
-};
+  timing: string;
+  contact: string;
+  doctorInCharge?: string;
+}): string {
+  return `ہسپتال یا کلینک: ${hosp.name}۔ ${hosp.categoryUrdu ? `${hosp.categoryUrdu}۔ ` : ''}پتہ: ${hosp.address}۔ ${hosp.distance ? `فاصلہ: ${hosp.distance}۔ ` : ''}اوقات: ${hosp.timing}۔ ${hosp.doctorInCharge ? `ڈاکٹر انچارج: ${hosp.doctorInCharge}۔ ` : ''}فون نمبر: ${hosp.contact}۔`;
+}
 
 /**
- * Foolproof 1-tap card speech toggle helper for 🔊 speaker buttons
+ * Normalizes voice recognition transcript for search without changing the user's meaning.
+ * Strips trailing punctuation added by speech-to-text engines (like ?, ۔, ., !) and collapses spaces.
  */
-export const toggleCardSpeech = (
-  cardId: string,
-  text: string,
-  currentPlayingId: string | null,
-  setPlayingId: (id: string | null) => void,
-  lang: Language = 'ur'
-) => {
-  unlockAudioContext();
-  if (currentPlayingId === cardId) {
-    stopSpeaking();
-    setPlayingId(null);
-  } else {
-    stopSpeaking();
-    setPlayingId(cardId);
-    playNotificationChime('start');
-    speakText(
-      cleanSpeechText(text),
-      lang,
-      () => setPlayingId(null),
-      {
-        isFemaleVillageVoice: false,
-        voiceGender: 'male',
-        rate: getSpeechRate(),
-        pitch: globalSpeechPitch,
-      }
-    );
-  }
-};
+export function normalizeVoiceTranscriptForSearch(transcript: string): string {
+  if (!transcript) return '';
+  return transcript
+    .trim()
+    .replace(/[؟?!۔.,،؛\s]+$/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-// Speech Recognition helper with fallback support
+/**
+ * Checks if Voice Input (Web Speech Recognition OR MediaRecorder + Gemini 3.5 Transcribe STT) is supported
+ */
+export function isSpeechRecognitionSupported(): boolean {
+  if (typeof window === 'undefined') return false;
+  const hasWebSpeech = Boolean(
+    (window as unknown as Record<string, unknown>).SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition
+  );
+  const hasMediaRecorder = Boolean(
+    typeof navigator !== 'undefined' &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.getUserMedia === 'function' &&
+      typeof MediaRecorder !== 'undefined'
+  );
+  return hasWebSpeech || hasMediaRecorder;
+}
+
+interface SpeechRecognitionInstance {
+  lang: string;
+  continuous: boolean;
+  interimResults: boolean;
+  maxAlternatives: number;
+  onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start: () => void;
+  stop: () => void;
+  abort: () => void;
+}
+
+interface SpeechRecognitionResultEvent {
+  results: {
+    length: number;
+    [index: number]: {
+      isFinal: boolean;
+      [altIndex: number]: {
+        transcript: string;
+      };
+    };
+  };
+}
+
 export class VoiceRecognizer {
-  private recognition: any = null;
-  public isListening = false;
+  private recognition: SpeechRecognitionInstance | null = null;
+  private fallbackRecorder: AudioVoiceRecorder | null = null;
+  private fallbackTimer: ReturnType<typeof setTimeout> | null = null;
+  private onResultCb: ((transcript: string, isFinal: boolean) => void) | null = null;
+  private onErrorCb: ((errorMsg: string) => void) | null = null;
+  private onEndCb: (() => void) | null = null;
+  private isListening = false;
 
   constructor(lang: Language = 'ur') {
-    const SpeechRecognition =
-      (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (typeof window === 'undefined') return;
+    const SpeechRec =
+      (window as unknown as Record<string, unknown>).SpeechRecognition ||
+      (window as unknown as Record<string, unknown>).webkitSpeechRecognition;
 
-    if (SpeechRecognition) {
-      this.recognition = new SpeechRecognition();
+    if (SpeechRec) {
+      const RecConstructor = SpeechRec as new () => SpeechRecognitionInstance;
+      this.recognition = new RecConstructor();
+      this.setLanguage(lang);
       this.recognition.continuous = false;
       this.recognition.interimResults = true;
-      this.recognition.maxAlternatives = 1;
-
-      if (lang === 'pa') {
-        this.recognition.lang = 'pa-PK';
-      } else if (lang === 'en') {
-        this.recognition.lang = 'en-US';
-      } else {
-        this.recognition.lang = 'ur-PK';
-      }
+      this.recognition.maxAlternatives = 3;
+    } else {
+      this.fallbackRecorder = new AudioVoiceRecorder();
     }
+  }
+
+  public setLanguage(lang: Language) {
+    if (!this.recognition) return;
+    if (lang === 'en') {
+      this.recognition.lang = 'en-PK';
+    } else if (lang === 'pa') {
+      this.recognition.lang = 'ur-PK';
+    } else {
+      this.recognition.lang = 'ur-PK';
+    }
+  }
+
+  public isAvailable(): boolean {
+    return this.recognition !== null || this.fallbackRecorder !== null;
   }
 
   public start(
-    onResult: (text: string, isFinal: boolean) => void,
-    onError: (err: any) => void,
+    onResult: (transcript: string, isFinal: boolean) => void,
+    onError: (errorMsg: string) => void,
     onEnd: () => void
   ) {
-    if (!this.recognition) {
-      onError(new Error('مائیکروفون اس براؤزر میں سپورٹ نہیں ہے'));
+    this.onResultCb = onResult;
+    this.onErrorCb = onError;
+    this.onEndCb = onEnd;
+
+    if (!this.recognition && !this.fallbackRecorder) {
+      onError('آپ کے براؤزر میں وائس سرچ کی سہولت موجود نہیں ہے۔ براہ کرم گوگل کروم استعمال کریں۔');
+      onEnd();
       return;
     }
 
-    this.isListening = true;
-    let lastRecognizedText = '';
+    if (this.isListening) {
+      this.stop();
+    }
 
-    this.recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
+    unlockAudioContext();
+    playNotificationChime('start');
 
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript;
+    // Fallback to MediaRecorder + Server-side Gemini 3.5 Transcribe (`/api/ai/transcribe`) if Web Speech API is absent
+    if (!this.recognition && this.fallbackRecorder) {
+      this.isListening = true;
+      this.fallbackRecorder.start().then((started) => {
+        if (!started) {
+          this.isListening = false;
+          onError('مائیکروفون کی اجازت نہیں ملی۔ براہ کرم براؤزر میں مائیکروفون Allow کریں۔');
+          onEnd();
+          return;
+        }
+        // Automatically stop after 6 seconds if user doesn't manually tap stop
+        this.fallbackTimer = setTimeout(() => {
+          if (this.isListening) {
+            this.stop();
+          }
+        }, 6000);
+      });
+      return;
+    }
+
+    if (!this.recognition) return;
+
+    this.recognition.onresult = (event: SpeechRecognitionResultEvent) => {
+      let interimTranscript = '';
+      let finalTranscript = '';
+
+      for (let i = 0; i < event.results.length; i++) {
+        const res = event.results[i];
+        if (res.isFinal) {
+          finalTranscript += res[0].transcript;
         } else {
-          interim += event.results[i][0].transcript;
+          interimTranscript += res[0].transcript;
         }
       }
 
-      const text = (final || interim).trim();
-      if (text) {
-        lastRecognizedText = text;
+      if (finalTranscript) {
+        onResult(normalizeVoiceTranscriptForSearch(finalTranscript), true);
+      } else if (interimTranscript) {
+        onResult(normalizeVoiceTranscriptForSearch(interimTranscript), false);
       }
-      onResult(text, Boolean(final));
     };
 
-    this.recognition.onerror = (e: any) => {
-      console.warn('VoiceRecognizer error:', e);
+    this.recognition.onerror = (event: { error: string }) => {
       this.isListening = false;
-      onError(e);
+      if (event.error === 'not-allowed' || event.error === 'permission-denied') {
+        onError('مائیکروفون کی اجازت نہیں ملی۔ براہ کرم براؤزر میں مائیکروفون Allow کریں۔');
+      } else if (event.error === 'no-speech') {
+        onError('کوئی آواز سنائی نہیں دی۔ براہ کرم مائیک کے قریب دوبارہ بولیں۔');
+      } else if (event.error === 'network') {
+        onError('انٹرنیٹ رابطے میں مسئلہ ہے۔ براہ کرم کنکشن چیک کریں یا نیچے دیے گئے بٹن دبائیں۔');
+      } else {
+        onError('آواز شناخت کرنے میں مسئلہ پیش آیا۔ براہ کرم دوبارہ کوشش کریں۔');
+      }
     };
 
     this.recognition.onend = () => {
       this.isListening = false;
-      // If we got interim text but not marked final before ending, deliver it now!
-      if (lastRecognizedText) {
-        onResult(lastRecognizedText, true);
-      }
       onEnd();
     };
 
     try {
+      this.isListening = true;
       this.recognition.start();
-    } catch (e) {
-      console.warn('Failed to start recognition:', e);
+    } catch {
       this.isListening = false;
-      onError(e);
+      onEnd();
     }
   }
 
   public stop() {
+    if (this.fallbackTimer) {
+      clearTimeout(this.fallbackTimer);
+      this.fallbackTimer = null;
+    }
+
     if (this.recognition && this.isListening) {
       try {
         this.recognition.stop();
-      } catch (e) {
-        console.warn('Failed to stop recognition:', e);
+      } catch {
+        // ignore
       }
       this.isListening = false;
+      return;
+    }
+
+    if (this.fallbackRecorder && this.isListening) {
+      this.isListening = false;
+      this.fallbackRecorder.stop().then(async ({ base64Audio }) => {
+        if (!base64Audio) {
+          if (this.onEndCb) this.onEndCb();
+          return;
+        }
+        try {
+          const res = await fetch('/api/ai/transcribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              audioBase64: base64Audio,
+              mimeType: 'audio/webm',
+            }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.ok && data?.transcript && this.onResultCb) {
+              this.onResultCb(normalizeVoiceTranscriptForSearch(data.transcript), true);
+            }
+          } else if (this.onErrorCb) {
+            this.onErrorCb('آواز شناخت کرنے میں مسئلہ پیش آیا۔');
+          }
+        } catch {
+          if (this.onErrorCb) {
+            this.onErrorCb('انٹرنیٹ رابطے میں مسئلہ ہے۔');
+          }
+        } finally {
+          if (this.onEndCb) this.onEndCb();
+        }
+      });
     }
   }
 }
 
-// Audio Voice Note Recorder for village messages
+/**
+ * Records voice messages into Base64 data URLs for in-app voice messaging
+ * (`LeaveMessageModal` and `InboxModal`).
+ */
 export class AudioVoiceRecorder {
   private mediaRecorder: MediaRecorder | null = null;
   private audioChunks: Blob[] = [];
-  private startTime: number = 0;
+  private stream: MediaStream | null = null;
+  private startTime = 0;
 
-  async start(): Promise<boolean> {
+  public async start(): Promise<boolean> {
+    if (
+      typeof window === 'undefined' ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      return false;
+    }
     try {
-      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        return false;
-      }
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      this.mediaRecorder = new MediaRecorder(stream);
+      this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       this.audioChunks = [];
+      this.mediaRecorder = new MediaRecorder(this.stream);
       this.startTime = Date.now();
 
-      this.mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) {
-          this.audioChunks.push(e.data);
+      this.mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          this.audioChunks.push(event.data);
         }
       };
 
       this.mediaRecorder.start();
       return true;
-    } catch (e) {
-      console.warn('AudioVoiceRecorder error:', e);
+    } catch {
       return false;
     }
   }
 
-  async stop(): Promise<{ base64Audio: string; durationEstimate: number }> {
+  public stop(): Promise<{ base64Audio: string; durationEstimate: number }> {
     return new Promise((resolve) => {
-      if (!this.mediaRecorder) {
+      if (!this.mediaRecorder || this.mediaRecorder.state === 'inactive') {
+        this.cleanup();
         resolve({ base64Audio: '', durationEstimate: 0 });
         return;
       }
 
+      const durationEstimate = Math.max(
+        1,
+        Math.round((Date.now() - this.startTime) / 1000)
+      );
+
       this.mediaRecorder.onstop = () => {
         const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
-        const durationEstimate = Math.round((Date.now() - this.startTime) / 1000);
         const reader = new FileReader();
         reader.onloadend = () => {
-          const base64Audio = reader.result as string;
+          const base64Audio = typeof reader.result === 'string' ? reader.result : '';
+          this.cleanup();
           resolve({ base64Audio, durationEstimate });
         };
+        reader.onerror = () => {
+          this.cleanup();
+          resolve({ base64Audio: '', durationEstimate: 0 });
+        };
         reader.readAsDataURL(audioBlob);
-
-        // Stop all tracks to release microphone
-        this.mediaRecorder?.stream.getTracks().forEach((t) => t.stop());
       };
 
-      this.mediaRecorder.stop();
+      try {
+        this.mediaRecorder.stop();
+      } catch {
+        this.cleanup();
+        resolve({ base64Audio: '', durationEstimate: 0 });
+      }
     });
   }
+
+  private cleanup() {
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => {
+        try {
+          track.stop();
+        } catch {
+          // ignore
+        }
+      });
+      this.stream = null;
+    }
+    this.mediaRecorder = null;
+    this.audioChunks = [];
+  }
 }
+

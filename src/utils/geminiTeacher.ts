@@ -1,57 +1,108 @@
-import { getOfflineAiResponse } from './aiKnowledgeEngine';
-import { SubjectKey } from '../types';
+import {
+  resolveEducationalQuestionLocally,
+  StructuredTeacherResponse,
+  EducationalSourceCitation,
+} from './aiKnowledgeEngine';
+import { SubjectKey, Language } from '../types';
+
+export interface AskTeacherOptions {
+  question: string;
+  selectedClass: string;
+  subject?: SubjectKey;
+  studentId?: string;
+  studentName?: string;
+  currentLesson?: string;
+  history?: Array<{ sender: 'student' | 'teacher'; text: string }>;
+}
 
 /**
- * Virtual School AI Helper Engine
- * Answers school questions in 3 to 4 simple sentences
+ * Full-featured Online School Teacher & Smart Answer Engine client service.
+ * 1. Calls the secure backend `/api/ai/teacher` (`gemini-3.8-flash` + Google Search grounding when needed).
+ * 2. Never exposes API keys in client-side code.
+ * 3. Uses the verified curriculum & math solver when offline or for instant deterministic verification,
+ *    and NEVER returns a repeated generic fallback paragraph!
+ */
+export async function askOnlineTeacherDetailed(
+  options: AskTeacherOptions
+): Promise<StructuredTeacherResponse> {
+  const cleanQ = (options.question || '').trim();
+  const subject: SubjectKey = options.subject || 'general';
+
+  if (!cleanQ) {
+    return resolveEducationalQuestionLocally({
+      question: '',
+      selectedClass: options.selectedClass,
+      subject,
+      studentName: options.studentName,
+    });
+  }
+
+  // First check if running in browser environment where `/api/ai/teacher` is reachable
+  if (typeof window !== 'undefined' && typeof fetch === 'function') {
+    try {
+      const response = await fetch('/api/ai/teacher', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          question: cleanQ,
+          selectedClass: options.selectedClass,
+          subject,
+          studentId: options.studentId || 'guest',
+          studentName: options.studentName || '',
+          currentLesson: options.currentLesson || '',
+          history: (options.history || []).slice(-6),
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.ok && typeof data.answer === 'string' && data.answer.trim()) {
+          const sources: EducationalSourceCitation[] = Array.isArray(data.sources)
+            ? data.sources
+            : [];
+          const lang: Language = data.language === 'en' ? 'en' : 'ur';
+          return {
+            ok: true,
+            question: cleanQ,
+            detectedSubject: subject,
+            language: lang,
+            answer: data.answer.trim(),
+            spokenText: (data.spokenText || data.answer).trim(),
+            sources,
+            usedOnlineSearch: Boolean(data.usedOnlineSearch),
+            provider: 'gemini-3.8-flash',
+          };
+        }
+      }
+    } catch {
+      // Network or server offline — fall through to verified curriculum engine
+    }
+  }
+
+  // Fallback to verified local curriculum & arithmetic solver (which never returns fake generic answers)
+  return resolveEducationalQuestionLocally({
+    question: cleanQ,
+    selectedClass: options.selectedClass,
+    subject,
+    studentName: options.studentName,
+    history: options.history,
+  });
+}
+
+/**
+ * Backwards-compatible helper returning the teacher's answer string.
  */
 export async function askSirAshraf(
   question: string,
   selectedClass: string,
   subject: SubjectKey = 'general'
 ): Promise<string> {
-  const cleanQ = question.trim();
-  if (!cleanQ) {
-    return 'السلام علیکم! آپ کیا سیکھنا چاہتے ہیں؟ اپنا سوال لکھیں یا مائیک دبا کر بولیں۔';
-  }
-
-  // Check if server-side Gemini or local engine is used
-  const apiKey =
-    (typeof process !== 'undefined' && process.env?.GEMINI_API_KEY) ||
-    '';
-
-  if (apiKey) {
-    try {
-      const { GoogleGenAI } = await import('@google/genai');
-      const ai = new GoogleGenAI({ apiKey });
-
-      const systemInstruction = `آپ رتہ کلاں ورچوئل اسکول کے مددگار ہیں۔
-آپ طلبہ کو نرسری سے دسویں جماعت (Nursery to 10th Matric) تک تعلیم دیتے ہیں۔
-موجودہ طالب علم کی جماعت ہے: "${selectedClass}" اور مضمون ہے: "${subject}"۔
-طرزِ تحریر:
-1. شائستہ، آسان اور مددگار اردو لہجہ (یا اگر سوال پنجابی میں ہو تو آسان پنجابی)۔
-2. جواب بالکل واضح، آسان اور 3 سے 4 مختصر جملوں میں ہو تاکہ بچہ باآسانی سمجھ سکے اور آواز سن سکے۔
-3. صرف اسکول کے درسی نصاب پر رہیں۔ غیر محفوظ یا غیر تعلیمی موضوعات پر شائستگی سے انکار کریں۔`;
-
-      const response = await ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: cleanQ,
-        config: {
-          systemInstruction,
-          temperature: 0.6,
-        },
-      });
-
-      const reply = response.text?.trim();
-      if (reply) {
-        return reply;
-      }
-    } catch (err) {
-      console.warn('Gemini API call skipped, using local subject engine:', err);
-    }
-  }
-
-  // Instant offline intelligence engine customized for subject & class level
-  const baseAnswer = getOfflineAiResponse(subject, cleanQ);
-  return `جماعت: ${selectedClass} | مضمون: ${subject}\n\n${baseAnswer}\n\nروزانہ محنت جاری رکھیں اور اپنا ہوم ورک مکمل کریں۔`;
+  const res = await askOnlineTeacherDetailed({
+    question,
+    selectedClass,
+    subject,
+  });
+  return res.answer;
 }

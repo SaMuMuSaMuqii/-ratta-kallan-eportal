@@ -17,7 +17,33 @@ import {
   initialFloodAlertStatus,
 } from './privacySanitizer';
 import { performUniversalSearch } from './searchEngine';
+import { runAllSearchEngineTests } from './searchEngine.test';
+import {
+  cleanSpeechText,
+  convertTextToPakistaniUrduPhonetics,
+  splitTextIntoUrduChunks,
+  detectTextLanguage,
+  normalizeVoiceTranscriptForSearch,
+  splitMixedLanguageSegments,
+  formatNumberForSpeech,
+} from './speech';
 import { appendAdminLogEntry, loadAdminLogs } from '../firebase/firestoreService';
+import { resolveEducationalQuestionLocally } from './aiKnowledgeEngine';
+import {
+  URDU_ALPHABETS,
+  ENGLISH_ABC,
+  COUNTING_TOYS,
+  OBJECTS_COLORS_SHAPES,
+  validateLearningItemMapping,
+  getEarlyLearningSpeechPayload,
+} from '../data/earlyLearningData';
+import { initialProfiles } from '../data/initialProfiles';
+import {
+  initialMosques,
+  initialInstitutes,
+  initialTransports,
+  initialHospitals,
+} from '../data/villageExtraData';
 
 const NOW_MS = Date.parse('2026-10-25T12:00:00Z');
 const TEN_DAYS_AGO = new Date(NOW_MS - 10 * 24 * 60 * 60 * 1000).toISOString();
@@ -882,9 +908,512 @@ check(
   `Leaks: ${searchIndexAudit.leakedFields.join(', ')}`
 );
 
+// ============================================================================
+// STEP 5: VOICE ASSISTANT, SEARCH ACCURACY & URDU TTS VERIFICATION SUITE
+// ============================================================================
+console.log('\n=== 7. Step 5: Voice Assistant Accuracy, Search Relevance & Urdu TTS ===');
+
+// 7.1 Search Engine 45-test suite verification
+const searchSuite = runAllSearchEngineTests();
+check(
+  `All ${searchSuite.total} Search Engine unit tests pass (passed=${searchSuite.passed}, failed=${searchSuite.failed})`,
+  searchSuite.failed === 0,
+  `Failed tests: ${searchSuite.results
+    .filter((r) => !r.passed)
+    .map((r) => r.description)
+    .join('; ')}`
+);
+
+// 7.2 Querying a non-existent person/shop name within a valid category must NOT return a false match
+const nonExistentElectricianSearch = performUniversalSearch({
+  query: 'خالد الیکٹریشن',
+  profiles: mockDataset.profiles,
+});
+check(
+  'Searching for non-existent "خالد الیکٹریشن" in Universal Search returns 0 false matches',
+  nonExistentElectricianSearch.length === 0,
+  `Got ${nonExistentElectricianSearch.length} matches: ${nonExistentElectricianSearch.map((m) => m.title).join(', ')}`
+);
+
+const nonExistentElectricianVoice = answerVoiceQuestion('خالد الیکٹریشن کا نمبر بتائیں', mockDataset, 'ur');
+check(
+  'Asking Voice Assistant for non-existent "خالد الیکٹریشن" states clearly that it is not available on the portal',
+  nonExistentElectricianVoice.intent === 'not_found' &&
+    nonExistentElectricianVoice.displayText.includes('معذرت، یہ معلومات فی الحال پورٹل پر دستیاب نہیں ہیں'),
+  `Got intent=${nonExistentElectricianVoice.intent}, text=${nonExistentElectricianVoice.displayText}`
+);
+
+// 7.3 Roman Urdu query for existing portal listing ("tariq solar" / "tariq electrician")
+const romanTariqSearch = performUniversalSearch({
+  query: 'tariq solar',
+  profiles: mockDataset.profiles,
+});
+check(
+  'Roman Urdu search "tariq solar" finds طارق محمود (طارق سولر و الیکٹریکل ورکس)',
+  romanTariqSearch.some((r) => r.id === 'elec-avail'),
+  `Got IDs: ${romanTariqSearch.map((r) => r.id).join(', ')}`
+);
+
+const romanTariqVoice = answerVoiceQuestion('tariq electrician ka number', mockDataset, 'ur');
+check(
+  'Roman Urdu voice query "tariq electrician ka number" returns طارق محمود with 0301-4455667',
+  romanTariqVoice.displayText.includes('طارق محمود') &&
+    romanTariqVoice.displayText.includes('0301-4455667'),
+  `Got: ${romanTariqVoice.displayText}`
+);
+
+// 7.4 Urdu TTS text cleaning, phonetics, language detection & multi-sentence chunking
+const sampleLongUrdu =
+  '<b>ڈاکٹر محمد نعیم</b> (نعیم کلینک) مین بازار رتہ کلاں میں ہیں۔ آج موجود ہیں (اوقات: 09:00 AM تا 09:00 PM)۔ فون نمبر: 0300-1234567۔ گندم کا ریٹ 3,900 تا 4,050 روپے فی من ہے۔ ایمرجنسی کے لیے 1122 پر کال کریں۔';
+const cleanedSample = cleanSpeechText(sampleLongUrdu);
+check(
+  'cleanSpeechText strips HTML tags like <b> and </b> cleanly',
+  !cleanedSample.includes('<b>') && !cleanedSample.includes('</b>') && cleanedSample.includes('ڈاکٹر محمد نعیم'),
+  `Got: ${cleanedSample}`
+);
+
+const phoneticSample = convertTextToPakistaniUrduPhonetics(sampleLongUrdu);
+check(
+  'convertTextToPakistaniUrduPhonetics converts phone numbers and 1122 into clear Urdu words',
+  phoneticSample.includes('صفر تین صفر صفر') && phoneticSample.includes('گیارہ بائیس'),
+  `Got: ${phoneticSample}`
+);
+
+const chunks = splitTextIntoUrduChunks(phoneticSample, 120);
+check(
+  'splitTextIntoUrduChunks splits multi-sentence Urdu response into sequential chunks without losing text',
+  chunks.length >= 2 && chunks.join(' ').includes('ڈاکٹر محمد نعیم') && chunks.join(' ').includes('گیارہ بائیس'),
+  `Got ${chunks.length} chunks`
+);
+
+check(
+  'detectTextLanguage accurately distinguishes Urdu script vs English/Latin text',
+  detectTextLanguage('رتہ کلاں پورٹل میں خوش آمدید', 'ur') === 'ur' &&
+    detectTextLanguage('Welcome to Ratta Kallan Portal', 'ur') === 'en',
+  'Language detection mismatch'
+);
+
+check(
+  'normalizeVoiceTranscriptForSearch strips trailing punctuation while preserving query meaning',
+  normalizeVoiceTranscriptForSearch('  ڈاکٹر نعیم کا نمبر کیا ہے؟  ') === 'ڈاکٹر نعیم کا نمبر کیا ہے',
+  `Got: "${normalizeVoiceTranscriptForSearch('  ڈاکٹر نعیم کا نمبر کیا ہے؟  ')}"`
+);
+
+// ============================================================================
+// STEP 7: COMPLETE HUMAN-LIKE AI VOICE ASSISTANT, ONLINE TEACHER,
+//         10 REGRESSION QUESTIONS & CHILDREN'S LEARNING VOICE SYSTEM
+// ============================================================================
+console.log('\n=== 8. Step 7: Online Teacher 10 Mandatory Regression Questions & Early Learning Voice ===');
+
+const tenRegressionQuestions: {
+  q: string;
+  subject: string;
+  mustIncludeAny: string[];
+  expectSources?: boolean;
+}[] = [
+  {
+    q: 'What is 2 + 2?',
+    subject: 'math',
+    mustIncludeAny: ['4', 'چار'],
+  },
+  {
+    q: 'What is the capital of Pakistan?',
+    subject: 'pak_studies',
+    mustIncludeAny: ['Islamabad', 'اسلام آباد'],
+  },
+  {
+    q: 'Explain photosynthesis in simple Urdu.',
+    subject: 'bio',
+    mustIncludeAny: ['ضیائی تالیف', 'سورج کی روشنی', 'خوراک'],
+  },
+  {
+    q: 'What is a noun? Give three English examples.',
+    subject: 'english',
+    mustIncludeAny: ['Ali', 'Lahore', 'Book', 'اسم'],
+  },
+  {
+    q: 'Why should we wash our hands before eating?',
+    subject: 'bio',
+    mustIncludeAny: ['جراثیم', 'germs', 'صحت'],
+  },
+  {
+    q: 'پاکستان میں بارش کیوں ہوتی ہے؟',
+    subject: 'pak_studies',
+    mustIncludeAny: ['مون سون', 'بادل', 'بارش'],
+  },
+  {
+    q: 'Explain the difference between a plant and an animal.',
+    subject: 'bio',
+    mustIncludeAny: ['پودے', 'جانور', 'Plants', 'Animals'],
+  },
+  {
+    q: 'What is 15 multiplied by 6?',
+    subject: 'math',
+    mustIncludeAny: ['90', 'نوے'],
+  },
+  {
+    q: 'Explain the water cycle to a class-three student.',
+    subject: 'bio',
+    mustIncludeAny: ['آبی چکر', 'بھاپ', 'بادل', 'بارش'],
+  },
+  {
+    q: 'Who is the current Prime Minister of Pakistan?',
+    subject: 'pak_studies',
+    mustIncludeAny: ['شہباز شریف', 'Shehbaz Sharif'],
+    expectSources: true,
+  },
+];
+
+const seenAnswers = new Set<string>();
+tenRegressionQuestions.forEach((item, idx) => {
+  const res = resolveEducationalQuestionLocally({
+    question: item.q,
+    selectedClass: 'پانچویں جماعت (Class 5)',
+    subject: item.subject as any,
+  });
+  const matchesKeyword = item.mustIncludeAny.some((kw) =>
+    res.answer.toLowerCase().includes(kw.toLowerCase())
+  );
+  const isUnique = !seenAnswers.has(res.answer);
+  seenAnswers.add(res.answer);
+
+  check(
+    `Step 7 Regression Q${idx + 1} ("${item.q}") gives accurate, unique answer`,
+    matchesKeyword && isUnique,
+    `Got answer: "${res.answer.slice(0, 120)}..."`
+  );
+
+  if (item.expectSources) {
+    check(
+      `Step 7 Regression Q${idx + 1} includes verified source links`,
+      Boolean(res.sources && res.sources.length > 0 && res.sources[0].url.startsWith('https://')),
+      `Got sources: ${JSON.stringify(res.sources)}`
+    );
+  }
+});
+
+// Verify cross-subject answering (asking a Science question while 'math' tab is selected never repeats a generic fallback)
+const crossSubjectRes = resolveEducationalQuestionLocally({
+  question: 'Explain photosynthesis in simple Urdu.',
+  selectedClass: 'پانچویں جماعت',
+  subject: 'math',
+});
+check(
+  'Asking a Science question while Math subject tab is active still answers the Science question accurately',
+  crossSubjectRes.answer.includes('ضیائی تالیف'),
+  `Got: ${crossSubjectRes.answer.slice(0, 80)}`
+);
+
+// Verify the 5 Mandatory Voice Test Sentences & Mixed Urdu-English Segmentation
+const fiveVoiceTestSentences = [
+  'السلام علیکم! آپ کیسے ہیں؟ میں آپ کی کیا مدد کر سکتا ہوں؟',
+  'بچو، آج ہم ایک سے دس تک گنتی سیکھیں گے۔',
+  'The sun rises in the east.',
+  'پاکستان کا دارالحکومت اسلام آباد ہے۔',
+  'آج ہم English میں five new words سیکھیں گے۔',
+];
+
+fiveVoiceTestSentences.forEach((sentence, sIdx) => {
+  const segments = splitMixedLanguageSegments(sentence, 'ur');
+  check(
+    `Voice Test Sentence #${sIdx + 1} produces clean language segments`,
+    segments.length >= 1 && segments.every((seg) => seg.text.trim().length > 0),
+    `Got segments: ${JSON.stringify(segments)}`
+  );
+});
+
+const mixedSentenceSegments = splitMixedLanguageSegments(
+  'آج ہم English میں five new words سیکھیں گے۔',
+  'ur'
+);
+check(
+  'Mixed Urdu-English sentence splits into both ur and en language segments so English words use English pronunciation',
+  mixedSentenceSegments.some((s) => s.lang === 'ur') &&
+    mixedSentenceSegments.some((s) => s.lang === 'en'),
+  `Got: ${JSON.stringify(mixedSentenceSegments)}`
+);
+
+// Verify Complete 38-Letter Urdu Alphabet, 26-Letter English Alphabet, Numbers & Verified Objects
+check(
+  'URDU_ALPHABETS contains all 38 standard Urdu letters (ا to ے) with verified mappings',
+  URDU_ALPHABETS.length === 38 &&
+    URDU_ALPHABETS.every((item) => validateLearningItemMapping(item).valid),
+  `Count=${URDU_ALPHABETS.length}`
+);
+
+check(
+  'ENGLISH_ABC contains all 26 English letters (A to Z) with verified mappings',
+  ENGLISH_ABC.length === 26 &&
+    ENGLISH_ABC.every((item) => validateLearningItemMapping(item).valid),
+  `Count=${ENGLISH_ABC.length}`
+);
+
+check(
+  'COUNTING_TOYS and OBJECTS_COLORS_SHAPES all pass image-to-label verification',
+  COUNTING_TOYS.every((item) => validateLearningItemMapping(item).valid) &&
+    OBJECTS_COLORS_SHAPES.every((item) => validateLearningItemMapping(item).valid),
+  'Failed learning item validation'
+);
+
+// Verify specific required Urdu letters: ا (الف), ب (بے), پ (پے), ت (تے), ٹ (ٹے), ث (ثے), ج (جیم), چ (چے), ح (حے), خ (خے)
+const requiredUrduChars = ['ا', 'ب', 'پ', 'ت', 'ٹ', 'ث', 'ج', 'چ', 'ح', 'خ'];
+requiredUrduChars.forEach((ch) => {
+  const found = URDU_ALPHABETS.find((u) => u.char === ch);
+  check(
+    `Urdu letter "${ch}" has distinct letter name, phonics sound, and example word`,
+    Boolean(
+      found &&
+        found.letterNameUrdu &&
+        found.phonicsSoundUrdu &&
+        found.objectLabelUrdu &&
+        getEarlyLearningSpeechPayload(found, 'letter_name', 'ur').text.includes(found.letterNameUrdu)
+    )
+  );
+});
+
+// Verify required numbers: 1, 2, 10, 25, 100 in Urdu and English
+check(
+  'Number speech formatting for 1, 2, 10, 25, 100 works in both Urdu and English',
+  formatNumberForSpeech(1, 'ur') === 'ایک' &&
+    formatNumberForSpeech(1, 'en') === 'one' &&
+    formatNumberForSpeech(2, 'ur') === 'دو' &&
+    formatNumberForSpeech(2, 'en') === 'two' &&
+    formatNumberForSpeech(10, 'ur') === 'دس' &&
+    formatNumberForSpeech(10, 'en') === 'ten' &&
+    formatNumberForSpeech(25, 'ur') === 'پچیس' &&
+    formatNumberForSpeech(25, 'en') === 'twenty-five' &&
+    formatNumberForSpeech(100, 'ur') === 'ایک سو' &&
+    formatNumberForSpeech(100, 'en') === 'one hundred',
+  'Number formatting mismatch'
+);
+
+// ============================================================================
+// COMPREHENSIVE PEOPLE SEARCH SYSTEM TESTS (ALL PROFILES, FIELDS & EDGE CASES)
+// ============================================================================
+
+const realPortalDataset: VoiceAskDataset = {
+  nowMs: NOW_MS,
+  profiles: initialProfiles,
+  mosques: initialMosques,
+  institutes: initialInstitutes,
+  transports: initialTransports,
+  hospitals: initialHospitals,
+  newsEvents: [],
+  announcements: [],
+};
+
+// 1. Test searching multiple different people's names in Urdu and English + requesting specific fields
+const peopleFieldCases = [
+  {
+    query: 'ثمر سعید کا فون نمبر کیا ہے؟',
+    expectedName: 'ثمر سعید (Samar Saeed)',
+    expectedPhone: '0300-1234567',
+    mustContain: '0300-1234567',
+  },
+  {
+    query: 'Samar Saeed phone number',
+    expectedName: 'ثمر سعید (Samar Saeed)',
+    expectedPhone: '0300-1234567',
+    mustContain: '0300-1234567',
+  },
+  {
+    query: 'وقاص علی بھٹی کا پتہ کہاں ہے؟',
+    expectedName: 'وقاص علی بھٹی',
+    expectedPhone: '03125566778',
+    mustContain: 'مین بازار، نزد جامع مسجد، رتہ کلاں',
+  },
+  {
+    query: 'Waqas Ali Bhatti address',
+    expectedName: 'وقاص علی بھٹی',
+    expectedPhone: '03125566778',
+    mustContain: 'مین بازار، نزد جامع مسجد، رتہ کلاں',
+  },
+  {
+    query: 'استاد محمد ارشد کے والد کا نام کیا ہے؟',
+    expectedName: 'استاد محمد ارشد',
+    expectedPhone: '0301-7654321',
+    mustContain: 'حاجی محمد بوٹا',
+  },
+  {
+    query: 'Ustad Arshad father name',
+    expectedName: 'استاد محمد ارشد',
+    expectedPhone: '0301-7654321',
+    mustContain: 'حاجی محمد بوٹا',
+  },
+  {
+    query: 'شہباز احمد نول کا ریٹ کیا ہے؟',
+    expectedName: 'شہباز احمد نول',
+    expectedPhone: '03084412390',
+    mustContain: 'معائنہ 200 روپے',
+  },
+  {
+    query: 'استاد اعجاز حسین لوہار کی تفصیل',
+    expectedName: 'استاد اعجاز حسین لوہار',
+    expectedPhone: '03446789123',
+    mustContain: 'اعجاز سٹیل ویلڈنگ اینڈ زرعی اوزار ورکشاپ',
+  },
+  {
+    query: 'Ijaz Lohar phone number',
+    expectedName: 'استاد اعجاز حسین لوہار',
+    expectedPhone: '03446789123',
+    mustContain: '03446789123',
+  },
+  {
+    query: 'چوہدری اصغر علی کا واٹس ایپ نمبر',
+    expectedName: 'چوہدری اصغر علی',
+    expectedPhone: '03056543210',
+    mustContain: '03056543210',
+  },
+];
+
+for (const tc of peopleFieldCases) {
+  const res = answerVoiceQuestion(tc.query, realPortalDataset, 'ur');
+  const uni = performUniversalSearch({
+    query: tc.query,
+    profiles: initialProfiles,
+    mosques: initialMosques,
+    institutes: initialInstitutes,
+    transports: initialTransports,
+    hospitals: initialHospitals,
+  });
+  check(
+    `People Search [${tc.query}] returns exact person "${tc.expectedName}" with requested field and zero school pollution`,
+    (res.intent === 'worker' || res.intent === 'doctor') &&
+      res.displayText.includes(tc.expectedName) &&
+      res.displayText.includes(tc.mustContain) &&
+      !res.displayText.includes('گورنمنٹ بوائز ہائی سکول') &&
+      !res.displayText.includes('ہیڈ ماسٹر') &&
+      uni.every((it) => it.type === 'profile') &&
+      uni.some((it) => it.title === tc.expectedName),
+    `Got intent=${res.intent}, display="${res.displayText}", uniItems=${uni.map((i) => `${i.type}:${i.title}`).join(',')}`
+  );
+}
+
+// 2. Test profiles with missing information (e.g. missing fatherName, missing phone, missing address, missing charges)
+const datasetWithMissingFields: VoiceAskDataset = {
+  ...mockDataset,
+  profiles: [
+    ...mockDataset.profiles,
+    {
+      id: 'missing-info-person',
+      name: 'عدنان نیازی',
+      businessName: 'نیازی سروسز',
+      category: 'other',
+      mobile: '', // Missing phone number!
+      whatsapp: '', // Missing WhatsApp!
+      address: '', // Missing address!
+      fatherName: '', // Missing father name!
+      chargesDescription: '', // Missing rate!
+      openingTime: '', // Missing timings!
+      closingTime: '',
+      services: [],
+      availability: 'available',
+      isAvailableForWorkToday: true,
+      termsAccepted: true,
+      createdAt: TODAY_ISO,
+    },
+  ],
+};
+
+const missingPhoneRes = answerVoiceQuestion(
+  'عدنان نیازی کا فون نمبر کیا ہے؟',
+  datasetWithMissingFields,
+  'ur'
+);
+check(
+  'Missing phone number on matched person profile clearly states phone number is not available in records without inventing or substituting another person',
+  missingPhoneRes.intent === 'worker' &&
+    missingPhoneRes.displayText.includes('عدنان نیازی') &&
+    missingPhoneRes.displayText.includes('فون نمبر ریکارڈ میں موجود نہیں ہے') &&
+    missingPhoneRes.phoneNumbers.length === 0,
+  `Got: ${missingPhoneRes.displayText} | phones=${JSON.stringify(missingPhoneRes.phoneNumbers)}`
+);
+
+const missingAddressRes = answerVoiceQuestion(
+  'Adnan Niazi address',
+  datasetWithMissingFields,
+  'ur'
+);
+check(
+  'Missing address on matched person profile clearly states address is not available in records',
+  missingAddressRes.intent === 'worker' &&
+    missingAddressRes.displayText.includes('عدنان نیازی') &&
+    missingAddressRes.displayText.includes('پتہ ریکارڈ میں موجود نہیں ہے'),
+  `Got: ${missingAddressRes.displayText}`
+);
+
+const missingFatherRes = answerVoiceQuestion(
+  'طارق محمود کے والد کا نام کیا ہے؟',
+  mockDataset,
+  'ur'
+);
+check(
+  'Missing father/family details on matched person profile clearly states it is not available in records',
+  missingFatherRes.intent === 'worker' &&
+    missingFatherRes.displayText.includes('طارق محمود') &&
+    missingFatherRes.displayText.includes('ریکارڈ میں موجود نہیں'),
+  `Got: ${missingFatherRes.displayText}`
+);
+
+// 3. Test names that do NOT exist in the database (never invent data, never substitute another person, never show school records)
+const nonExistentPeopleQueries = [
+  'Akhtar',
+  'اختر',
+  'Akhtar phone number',
+  'اختر کا فون نمبر',
+  'Zeeshan Gondal address',
+  'ذیشان گوندل کا پتہ',
+  'بشیر پلمبر کا نمبر',
+];
+
+for (const q of nonExistentPeopleQueries) {
+  const res = answerVoiceQuestion(q, realPortalDataset, 'ur');
+  const uni = performUniversalSearch({
+    query: q,
+    profiles: initialProfiles,
+    mosques: initialMosques,
+    institutes: initialInstitutes,
+    transports: initialTransports,
+    hospitals: initialHospitals,
+  });
+  check(
+    `Non-existent person query "${q}" returns not_found, 0 phone numbers, 0 substitute profiles, and 0 school records`,
+    res.intent === 'not_found' &&
+      res.phoneNumbers.length === 0 &&
+      (res.matchedItems?.length || 0) === 0 &&
+      !res.displayText.includes('گورنمنٹ') &&
+      !res.displayText.includes('سکول') &&
+      uni.length === 0,
+    `Got intent=${res.intent}, phones=${res.phoneNumbers.length}, uni=${uni.length}, display="${res.displayText}"`
+  );
+}
+
+// 4. Test multiple people with similar names (asks user to select the right person)
+const multiPersonRes = answerVoiceQuestion('احمد کا فون نمبر', realPortalDataset, 'ur');
+check(
+  'Searching a shared name ("احمد کا فون نمبر") detects multiple people with similar names and asks user to select the right person',
+  multiPersonRes.intent === 'unclear' &&
+    multiPersonRes.needsClarification === true &&
+    Array.isArray(multiPersonRes.clarificationOptions) &&
+    multiPersonRes.clarificationOptions.length >= 2 &&
+    multiPersonRes.phoneNumbers.length === 0,
+  `Got intent=${multiPersonRes.intent}, needsClarification=${multiPersonRes.needsClarification}, options=${JSON.stringify(multiPersonRes.clarificationOptions)}`
+);
+
+const multiPersonEnRes = answerVoiceQuestion('Ahmad phone number', realPortalDataset, 'ur');
+check(
+  'Searching shared name in English ("Ahmad phone number") also asks user to select the right person',
+  multiPersonEnRes.intent === 'unclear' &&
+    multiPersonEnRes.needsClarification === true &&
+    Array.isArray(multiPersonEnRes.clarificationOptions) &&
+    multiPersonEnRes.clarificationOptions.length >= 2,
+  `Got intent=${multiPersonEnRes.intent}, options=${JSON.stringify(multiPersonEnRes.clarificationOptions)}`
+);
+
 if (failed > 0) {
   console.error(`\n❌ ${failed} test(s) failed out of ${passed + failed}.`);
   process.exit(1);
 } else {
-  console.log(`\n✅ All ${passed} Portal Supervision, Privacy & Voice Assistant tests passed (0 failed)!`);
+  console.log(`\n✅ All ${passed} Portal Supervision, Privacy, Voice Assistant & Step 7 Online Teacher tests passed (0 failed)!`);
 }
+

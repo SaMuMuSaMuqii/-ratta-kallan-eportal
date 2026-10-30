@@ -8,44 +8,49 @@ import {
   MicOff,
   Send,
   BookOpen,
-  CheckCircle,
-  HelpCircle,
-  Sparkles,
-  Calendar,
   Award,
   Play,
+  Pause,
   RotateCcw,
-  Check,
-  User,
-  ShieldCheck,
   IdCard,
-  QrCode,
-  LogOut,
-  ChevronRight,
-  Maximize2,
-  Star,
   Printer,
-  Sparkle,
-  MessageCircle,
-  CheckCircle2,
-  AlertCircle,
-  Radio,
+  Trash2,
+  ExternalLink,
+  LogOut,
 } from 'lucide-react';
 import { Language, SubjectKey, AiSchoolStudent } from '../types';
 import {
   speakText,
   stopSpeaking,
+  pauseSpeaking,
+  resumeSpeaking,
+  subscribeSpeechState,
+  speakSequentialCounting,
   playNotificationChime,
   VoiceRecognizer,
   isSpeechRecognitionSupported,
   unlockAudioContext,
   getSpeechRate,
+  setGlobalSpeechSlowMode,
+  getGlobalSpeechSlowMode,
   cleanSpeechText,
+  getVoiceAvailabilityStatus,
 } from '../utils/speech';
-import { askSirAshraf } from '../utils/geminiTeacher';
+import { askOnlineTeacherDetailed } from '../utils/geminiTeacher';
+import { EducationalSourceCitation } from '../utils/aiKnowledgeEngine';
 import { getSchoolOperatingStatus } from '../utils/operatingHours';
-import { URDU_ALPHABETS, COUNTING_TOYS, ENGLISH_ABC } from '../data/earlyLearningData';
-import { saveStudentProgressToFirestore, loadStudentProgressFromFirestore } from '../firebase/firestoreService';
+import {
+  URDU_ALPHABETS,
+  COUNTING_TOYS,
+  ENGLISH_ABC,
+  OBJECTS_COLORS_SHAPES,
+  EARLY_LEARNING_QUIZ_QUESTIONS,
+  EarlyLearningItem,
+  EarlyLearningMode,
+  getEarlyLearningSpeechPayload,
+  validateLearningItemMapping,
+} from '../data/earlyLearningData';
+import { saveStudentProgressToFirestore } from '../firebase/firestoreService';
 
 interface AiSchoolModalProps {
   isOpen: boolean;
@@ -54,7 +59,19 @@ interface AiSchoolModalProps {
 }
 
 const STORAGE_STUDENT_KEY = 'rk_ai_school_current_student_v2';
-const STORAGE_ALL_STUDENTS_KEY = 'rk_ai_school_all_students_v2';
+const STORAGE_SESSIONS_KEY = 'rk_ai_school_chat_sessions_v2';
+
+export interface SchoolChatMessage {
+  id: string;
+  sender: 'student' | 'teacher';
+  text: string;
+  spokenText?: string;
+  followUpQuestion?: string;
+  sources?: EducationalSourceCitation[];
+  usedOnlineSearch?: boolean;
+  provider?: string;
+  timestamp: string;
+}
 
 // 12 Classes from Nursery to 10th Matric
 export const VILLAGE_SCHOOL_CLASSES = [
@@ -166,6 +183,15 @@ const homeworkBySubject: Record<SubjectKey, HomeworkItem> = {
   },
 };
 
+const createInitialWelcomeMessage = (studentName?: string): SchoolChatMessage => ({
+  id: 'welcome-msg',
+  sender: 'teacher',
+  text: studentName
+    ? `السلام علیکم ${studentName} بیٹا! آج کون سا سبق پڑھنا ہے؟ نرسری سے دسویں جماعت تک کوئی بھی سوال پوچھیں یا مائیک دبا کر بولیں۔`
+    : 'السلام علیکم! آج کون سا سبق پڑھنا ہے؟ نرسری سے دسویں جماعت تک کوئی بھی سوال پوچھیں یا بول کر بتائیں۔',
+  timestamp: new Date().toLocaleTimeString('ur-PK', { hour: '2-digit', minute: '2-digit' }),
+});
+
 export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
   isOpen,
   onClose,
@@ -180,29 +206,60 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
     return null;
   });
 
+  // Student Session Isolation: Map of studentId -> SchoolChatMessage[]
+  const [sessionsMap, setSessionsMap] = useState<Record<string, SchoolChatMessage[]>>(() => {
+    try {
+      const raw = localStorage.getItem(STORAGE_SESSIONS_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {}
+    return {};
+  });
+
+  const activeSessionKey = currentStudent?.id || 'guest_student';
+  const chatHistory: SchoolChatMessage[] = sessionsMap[activeSessionKey] || [
+    createInitialWelcomeMessage(currentStudent?.name),
+  ];
+
+  const updateCurrentSessionChat = (updater: (prev: SchoolChatMessage[]) => SchoolChatMessage[]) => {
+    setSessionsMap((prevMap) => {
+      const currentList = prevMap[activeSessionKey] || [createInitialWelcomeMessage(currentStudent?.name)];
+      const nextList = updater(currentList);
+      const updatedMap = { ...prevMap, [activeSessionKey]: nextList };
+      try {
+        localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(updatedMap));
+      } catch {}
+      return updatedMap;
+    });
+  };
+
   // Selected Class (Nursery to 10th Matric)
   const [selectedClassId, setSelectedClassId] = useState<string>('class5');
   const [selectedSubjectKey, setSelectedSubjectKey] = useState<SubjectKey>('math');
 
   // Active view tab (Classroom, Nursery Fun Learning, Homework, ID Card)
   const [activeTab, setActiveTab] = useState<'classroom' | 'nursery' | 'homework' | 'idcard'>('classroom');
-  const [nurseryCategory, setNurseryCategory] = useState<'urdu' | 'counting' | 'english' | 'quiz'>('urdu');
+  const [nurseryCategory, setNurseryCategory] = useState<'urdu' | 'counting' | 'english' | 'objects' | 'quiz'>('urdu');
+  const [learningMode, setLearningMode] = useState<EarlyLearningMode>('full');
   const [activePlayingId, setActivePlayingId] = useState<string | null>(null);
+  const [isSequentialCounting, setIsSequentialCounting] = useState<boolean>(false);
+  const [repeatSlowlyCounting, setRepeatSlowlyCounting] = useState<boolean>(true);
+  const [activeQuizIdx, setActiveQuizIdx] = useState<number>(0);
+  const [quizFeedbackText, setQuizFeedbackText] = useState<string | null>(null);
 
   // Question & Answer state
   const [questionInput, setQuestionInput] = useState('');
   const [isLoadingAnswer, setIsLoadingAnswer] = useState(false);
-  const [chatHistory, setChatHistory] = useState<Array<{ sender: 'student' | 'teacher'; text: string }>>([
-    {
-      sender: 'teacher',
-      text: 'السلام علیکم! آج کون سا سبق پڑھنا ہے؟ نرسری سے دسویں جماعت تک کوئی بھی سوال پوچھیں یا بول کر بتائیں۔',
-    },
-  ]);
 
-  // Voice recording state
+  // Voice recording & playback state
   const [isListeningVoice, setIsListeningVoice] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isPausedAudio, setIsPausedAudio] = useState(false);
+  const [activeSpokenSegment, setActiveSpokenSegment] = useState<string>('');
+  const [lastSpokenText, setLastSpokenText] = useState<string>('');
+  const [teacherVoiceGender, setTeacherVoiceGender] = useState<'male' | 'female'>('male');
+  const [slowMode, setSlowMode] = useState<boolean>(() => getGlobalSpeechSlowMode());
   const voiceRecognizerRef = useRef<VoiceRecognizer | null>(null);
+  const chatBottomRef = useRef<HTMLDivElement | null>(null);
 
   // Homework interactive state
   const [selectedAnswerIndex, setSelectedAnswerIndex] = useState<number | null>(null);
@@ -217,11 +274,28 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
   const [regPhoto, setRegPhoto] = useState<string>('');
   const photoInputRef = useRef<HTMLInputElement>(null);
 
+  // Subscribe to global speech state for accurate play/pause tracking
+  useEffect(() => {
+    const unsubscribe = subscribeSpeechState((state) => {
+      setIsPlayingAudio(state.isPlaying);
+      setIsPausedAudio(state.isPaused);
+      if (!state.isPlaying) {
+        setIsSequentialCounting(false);
+        setActiveSpokenSegment('');
+      }
+    });
+    return unsubscribe;
+  }, []);
+
+  // Auto-scroll chat to bottom when new message arrives
+  useEffect(() => {
+    chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory.length, isLoadingAnswer]);
+
   const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     if (file.size > 4 * 1024 * 1024) {
-      alert('تصویر کا سائز 4 ایم بی سے کم ہونا چاہیے۔');
       return;
     }
     const reader = new FileReader();
@@ -237,6 +311,10 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
       try {
         localStorage.setItem(STORAGE_STUDENT_KEY, JSON.stringify(currentStudent));
       } catch {}
+    } else {
+      try {
+        localStorage.removeItem(STORAGE_STUDENT_KEY);
+      } catch {}
     }
   }, [currentStudent]);
 
@@ -246,44 +324,119 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
       const timer = setTimeout(() => {
         unlockAudioContext();
         playNotificationChime('teacher');
-        speakText(
-          'السلام علیکم! رتہ کلاں ورچوئل اسکول میں آپ کا خیر مقدم ہے۔ نرسری سے لے کر دسویں جماعت کے تمام مضامین میں کوئی بھی سوال پوچھیں یا ہوم ورک حل کریں۔ آئیے مل کر پڑھتے ہیں!',
-          lang,
-          undefined,
-          { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
-        );
-      }, 500);
+        const greeting =
+          'السلام علیکم! رتہ کلاں ورچوئل اسکول میں آپ کا خیر مقدم ہے۔ نرسری سے لے کر دسویں جماعت کے تمام مضامین میں کوئی بھی سوال پوچھیں یا ہوم ورک حل کریں۔ آئیے مل کر پڑھتے ہیں!';
+        setLastSpokenText(greeting);
+        speakText(greeting, lang, undefined, {
+          isFemaleVillageVoice: teacherVoiceGender === 'female',
+          voiceGender: teacherVoiceGender,
+          rate: slowMode ? 0.84 : 0.95,
+          pitch: 1.0,
+        });
+      }, 450);
       return () => clearTimeout(timer);
     }
-  }, [isOpen, lang]);
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
   const schoolStatus = getSchoolOperatingStatus();
+  const voiceStatus = getVoiceAvailabilityStatus(lang);
   const currentClassObj =
-    VILLAGE_SCHOOL_CLASSES.find((c) => c.id === selectedClassId) || VILLAGE_SCHOOL_CLASSES[4];
+    VILLAGE_SCHOOL_CLASSES.find((c) => c.id === selectedClassId) || VILLAGE_SCHOOL_CLASSES[6];
   const currentHomework = homeworkBySubject[selectedSubjectKey];
+  const currentQuiz =
+    EARLY_LEARNING_QUIZ_QUESTIONS[activeQuizIdx % EARLY_LEARNING_QUIZ_QUESTIONS.length];
+
+  const speakWithTeacherVoice = (text: string, onEnd?: () => void, customRate?: number) => {
+    unlockAudioContext();
+    const cleaned = cleanSpeechText(text);
+    setLastSpokenText(cleaned);
+    setActiveSpokenSegment(cleaned);
+    speakText(cleaned, lang, onEnd, {
+      isFemaleVillageVoice: teacherVoiceGender === 'female',
+      voiceGender: teacherVoiceGender,
+      rate: customRate || (slowMode ? 0.82 : getSpeechRate()),
+      pitch: 1.0,
+      onSegmentChange: (seg) => setActiveSpokenSegment(seg),
+    });
+  };
 
   const handleSchoolGreeting = () => {
-    unlockAudioContext();
     playNotificationChime('teacher');
-    speakText(
-      'السلام علیکم! رتہ کلاں ورچوئل اسکول میں آپ کا خیر مقدم ہے۔ نرسری سے لے کر دسویں جماعت کے تمام مضامین میں کوئی بھی سوال پوچھیں یا ہوم ورک حل کریں۔ آئیے مل کر پڑھتے ہیں!',
-      lang,
-      undefined,
-      { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
+    speakWithTeacherVoice(
+      'السلام علیکم! رتہ کلاں ورچوئل اسکول میں آپ کا خیر مقدم ہے۔ نرسری سے لے کر دسویں جماعت کے تمام مضامین میں کوئی بھی سوال پوچھیں یا ہوم ورک حل کریں۔ آئیے مل کر پڑھتے ہیں!'
     );
   };
 
-  const handlePlayEarlyItem = (item: { id: string; spokenText: string }) => {
+  // Verified Early Learning Item Speech with Mode Selection
+  const handlePlayEarlyItem = (item: EarlyLearningItem, overrideMode?: EarlyLearningMode) => {
     unlockAudioContext();
+    setIsSequentialCounting(false);
+
+    // Validate image-to-label mapping before speaking
+    const validation = validateLearningItemMapping(item);
+    if (!validation.valid) {
+      console.warn('Learning item validation failed:', validation.warningUrdu);
+      return;
+    }
+
+    const modeToUse = overrideMode || learningMode;
+    const payload = getEarlyLearningSpeechPayload(item, modeToUse, lang);
+
     setActivePlayingId(item.id);
+    setLastSpokenText(payload.text);
+    setActiveSpokenSegment(payload.text);
     playNotificationChime('chime');
     speakText(
-      item.spokenText,
-      lang,
+      payload.text,
+      payload.lang,
       () => setActivePlayingId(null),
-      { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
+      {
+        isFemaleVillageVoice: teacherVoiceGender === 'female',
+        voiceGender: teacherVoiceGender,
+        rate: slowMode ? 0.8 : 0.92,
+        pitch: 1.0,
+      }
+    );
+  };
+
+  // Sequential Counting 1 to 10 with Visual Card Highlighting
+  const handleStartSequentialCounting = () => {
+    unlockAudioContext();
+    if (isSequentialCounting) {
+      stopSpeaking();
+      setIsSequentialCounting(false);
+      setActivePlayingId(null);
+      return;
+    }
+
+    const oneToTen = COUNTING_TOYS.filter(
+      (item) => item.numberValue && item.numberValue >= 1 && item.numberValue <= 10
+    );
+
+    setIsSequentialCounting(true);
+    playNotificationChime('teacher');
+
+    const useEnglishOnly = learningMode === 'english_only';
+    speakSequentialCounting(
+      oneToTen.map((item) => ({
+        id: item.id,
+        text: useEnglishOnly
+          ? `${item.numberValue}, ${item.englishNumberWord}. ${item.objectLabelEn}.`
+          : `${item.urduNumberWord}۔ ${item.numberValue} (${item.englishNumberWord})۔ ${item.objectLabelUrdu}۔`,
+        lang: useEnglishOnly ? 'en' : 'ur',
+      })),
+      {
+        repeatEach: repeatSlowlyCounting,
+        slowMode: slowMode || repeatSlowlyCounting,
+        voiceGender: teacherVoiceGender,
+        onItemStart: (id) => setActivePlayingId(id),
+        onComplete: () => {
+          setIsSequentialCounting(false);
+          setActivePlayingId(null);
+        },
+      }
     );
   };
 
@@ -291,26 +444,55 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
     const q = (customQ || questionInput).trim();
     if (!q) return;
 
+    // Barge-in: immediately stop any ongoing speech before answering new question
+    stopSpeaking();
     unlockAudioContext();
     playNotificationChime('start');
-    setChatHistory((prev) => [...prev, { sender: 'student', text: q }]);
+
+    const studentMsg: SchoolChatMessage = {
+      id: `stu-${Date.now()}`,
+      sender: 'student',
+      text: q,
+      timestamp: new Date().toLocaleTimeString('ur-PK', { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    const historySnapshot = [...chatHistory, studentMsg];
+    updateCurrentSessionChat(() => historySnapshot);
     setQuestionInput('');
     setIsLoadingAnswer(true);
 
     try {
-      const answer = await askSirAshraf(q, currentClassObj.name, selectedSubjectKey);
-      setChatHistory((prev) => [...prev, { sender: 'teacher', text: answer }]);
+      const response = await askOnlineTeacherDetailed({
+        question: q,
+        selectedClass: currentClassObj.name,
+        subject: selectedSubjectKey,
+        studentId: currentStudent?.id || 'guest_student',
+        studentName: currentStudent?.name,
+        history: historySnapshot.slice(-8).map((m) => ({
+          sender: m.sender,
+          text: m.text,
+        })),
+      });
+
+      const teacherMsg: SchoolChatMessage = {
+        id: `tea-${Date.now()}`,
+        sender: 'teacher',
+        text: response.answer,
+        spokenText: response.spokenText,
+        followUpQuestion: response.followUpQuestion,
+        sources: response.sources,
+        usedOnlineSearch: response.usedOnlineSearch,
+        provider: response.provider,
+        timestamp: new Date().toLocaleTimeString('ur-PK', { hour: '2-digit', minute: '2-digit' }),
+      };
+
+      updateCurrentSessionChat((prev) => [...prev, teacherMsg]);
       playNotificationChime('teacher');
 
-      // Speak answer aloud
-      setIsPlayingAudio(true);
-      speakText(cleanSpeechText(answer), lang, () => setIsPlayingAudio(false), {
-        isFemaleVillageVoice: false, // Male respected teacher voice
-        rate: getSpeechRate(),
-        pitch: 1.0,
-      });
+      // Speak the clean conversational response aloud
+      speakWithTeacherVoice(response.spokenText || response.answer);
     } catch (e) {
-      console.error('Error asking Sir Ashraf:', e);
+      console.error('Error asking Online Teacher:', e);
     } finally {
       setIsLoadingAnswer(false);
     }
@@ -318,6 +500,11 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
 
   const handleToggleVoiceQuestion = () => {
     unlockAudioContext();
+    // Barge-in support: if the teacher is currently speaking, stop speaking immediately so student can talk
+    if (isPlayingAudio) {
+      stopSpeaking();
+    }
+
     if (isListeningVoice) {
       if (voiceRecognizerRef.current) {
         voiceRecognizerRef.current.stop();
@@ -327,7 +514,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
     }
 
     if (!isSpeechRecognitionSupported()) {
-      alert('مائیکروفون اس براؤزر میں سپورٹ نہیں ہے، براہ کرم سوال لکھ کر پوچھیں۔');
       return;
     }
 
@@ -339,7 +525,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
     vr.start(
       (transcript, isFinal) => {
         setQuestionInput(transcript);
-        if (isFinal) {
+        if (isFinal && transcript.trim()) {
           setIsListeningVoice(false);
           handleAskQuestion(transcript);
         }
@@ -356,30 +542,42 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
 
   const handleStopAudio = () => {
     stopSpeaking();
-    setIsPlayingAudio(false);
+    setActivePlayingId(null);
+    setIsSequentialCounting(false);
   };
 
-  const handleSpeakText = (text: string) => {
-    unlockAudioContext();
-    if (isPlayingAudio) {
-      stopSpeaking();
-      setIsPlayingAudio(false);
+  const handleTogglePauseResume = () => {
+    if (isPausedAudio) {
+      resumeSpeaking();
     } else {
-      setIsPlayingAudio(true);
-      playNotificationChime('teacher');
-      speakText(cleanSpeechText(text), lang, () => setIsPlayingAudio(false), {
-        isFemaleVillageVoice: false,
-        rate: getSpeechRate(),
-        pitch: 1.0,
-      });
+      pauseSpeaking();
     }
+  };
+
+  const handleReplayLastAudio = () => {
+    if (!lastSpokenText) return;
+    speakWithTeacherVoice(lastSpokenText);
+  };
+
+  const handleToggleSlowMode = () => {
+    const next = !slowMode;
+    setSlowMode(next);
+    setGlobalSpeechSlowMode(next);
+  };
+
+  const handleClearStudentChat = () => {
+    stopSpeaking();
+    updateCurrentSessionChat(() => [createInitialWelcomeMessage(currentStudent?.name)]);
+  };
+
+  const handleLogoutStudent = () => {
+    stopSpeaking();
+    setCurrentStudent(null);
+    setIsRegistering(false);
   };
 
   const handleSubmitHomework = () => {
-    if (selectedAnswerIndex === null) {
-      alert('براہ کرم کسی ایک جواب کا انتخاب کریں!');
-      return;
-    }
+    if (selectedAnswerIndex === null) return;
 
     unlockAudioContext();
     const isCorrect = selectedAnswerIndex === currentHomework.correctIndex;
@@ -390,12 +588,9 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
       const rewardText = `ماشاء اللہ بہت خوب! بالکل درست جواب۔ ${currentHomework.explanation} آپ کو +2 ستارے مل چکے ہیں۔`;
       setHomeworkFeedback(rewardText);
 
-      // Award +2 stars
       if (currentStudent) {
         const updatedStars = (currentStudent.stars || 0) + 2;
-        setCurrentStudent((prev) =>
-          prev ? { ...prev, stars: updatedStars } : prev
-        );
+        setCurrentStudent((prev) => (prev ? { ...prev, stars: updatedStars } : prev));
         saveStudentProgressToFirestore({
           id: currentStudent.id,
           name: currentStudent.name,
@@ -407,21 +602,14 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
         }).catch((err) => console.warn('Student progress save notice:', err));
       }
 
-      speakText(cleanSpeechText(rewardText), lang, undefined, {
-        isFemaleVillageVoice: false,
-        pitch: 1.0,
-      });
+      speakWithTeacherVoice(rewardText);
     } else {
       playNotificationChime('alert');
-      const tryAgainText = `دوبارہ کوشش کریں بیٹا! صحیح جواب یہ تھا: ${
+      const tryAgainText = `حوصلہ رکھیں بیٹا، دوبارہ غور کریں! صحیح جواب یہ تھا: ${
         currentHomework.options[currentHomework.correctIndex]
       }۔ ${currentHomework.explanation}`;
       setHomeworkFeedback(tryAgainText);
-
-      speakText(cleanSpeechText(tryAgainText), lang, undefined, {
-        isFemaleVillageVoice: false,
-        pitch: 1.0,
-      });
+      speakWithTeacherVoice(tryAgainText);
     }
   };
 
@@ -437,12 +625,26 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
       rollNumber: rollNo,
       classGrade: regClass,
       admissionDate: new Date().toLocaleDateString('ur-PK'),
-      stars: 5, // Welcome bonus
+      stars: 5,
       completedHomework: [],
-      photo: regPhoto || 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=200&h=200&fit=crop',
+      photo:
+        regPhoto ||
+        'https://images.unsplash.com/photo-1544717305-2782549b5136?w=200&h=200&fit=crop',
     };
 
     setCurrentStudent(newStudent);
+    // Initialize isolated session for new student
+    setSessionsMap((prev) => {
+      const updated = {
+        ...prev,
+        [newStudent.id]: [createInitialWelcomeMessage(newStudent.name)],
+      };
+      try {
+        localStorage.setItem(STORAGE_SESSIONS_KEY, JSON.stringify(updated));
+      } catch {}
+      return updated;
+    });
+
     saveStudentProgressToFirestore({
       id: newStudent.id,
       name: newStudent.name,
@@ -457,48 +659,69 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
     setActiveTab('idcard');
     playNotificationChime('success');
 
-    speakText(
-      `مبارک ہو ${newStudent.name}! ورچوئل اسکول رتہ کلاں میں آپ کا داخلہ ہو چکا ہے۔ آپ کا رول نمبر ${newStudent.rollNumber} ہے۔`,
-      lang,
-      undefined,
-      { isFemaleVillageVoice: false, pitch: 1.0 }
+    speakWithTeacherVoice(
+      `مبارک ہو ${newStudent.name}! ورچوئل اسکول رتہ کلاں میں آپ کا داخلہ ہو چکا ہے۔ آپ کا رول نمبر ${newStudent.rollNumber} ہے۔`
     );
   };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-2.5 sm:p-4 overflow-y-auto animate-in fade-in duration-200">
-      <div className="bg-white border-2 border-indigo-500 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl my-auto flex flex-col max-h-[92vh]">
-        {/* Top Header Banner: Sir Ashraf */}
+      <div className="bg-white border-2 border-indigo-500 rounded-3xl w-full max-w-2xl overflow-hidden shadow-2xl my-auto flex flex-col max-h-[94vh]">
+        {/* Top Header Banner */}
         <div className="bg-gradient-to-r from-indigo-950 via-purple-950 to-stone-950 text-white p-3.5 sm:p-4 relative overflow-hidden shrink-0">
-          <div className="flex items-center justify-between relative z-10">
+          <div className="flex items-center justify-between relative z-10 gap-2">
             <div className="flex items-center gap-2.5">
-              <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-200 text-stone-950 flex items-center justify-center font-bold shadow-lg shrink-0 border-2 border-white/20">
-                <GraduationCap className="w-7 h-7 text-indigo-950" />
+              <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-200 text-stone-950 flex items-center justify-center font-bold shadow-lg shrink-0 border-2 border-white/20">
+                <GraduationCap className="w-6 h-6 text-indigo-950" />
               </div>
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h3 className="text-base sm:text-lg font-bold font-nastaliq text-amber-200 leading-tight">
-                    رتہ کلاں ورچوئل AI اسکول
+                    رتہ کلاں ورچوئل AI اسکول و آن لائن استاد
                   </h3>
                   <span className="bg-emerald-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full font-nastaliq">
-                    اسکول رہنمائی
+                    {currentStudent ? `طالب علم: ${currentStudent.name}` : 'مفت صوتی اسکول'}
                   </span>
                 </div>
                 <p className="text-[11px] text-indigo-200 font-nastaliq">
-                  نرسری تا دسویں جماعت (Matric) — مفت صوتی تعلیم، ہوم ورک اور سوال جواب
+                  نرسری تا دسویں جماعت (Matric) — ہر سوال کا درست اور تفصیلی جواب
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-1.5">
+            {/* Top Audio & Close Controls */}
+            <div className="flex items-center gap-1.5 flex-wrap justify-end">
               {isPlayingAudio && (
+                <>
+                  <button
+                    onClick={handleTogglePauseResume}
+                    className="px-2 py-1 bg-amber-400 hover:bg-amber-300 text-stone-950 text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer"
+                    title={isPausedAudio ? 'جاری رکھیں' : 'وقفہ کریں'}
+                  >
+                    {isPausedAudio ? <Play className="w-3.5 h-3.5" /> : <Pause className="w-3.5 h-3.5" />}
+                    <span className="font-nastaliq hidden sm:inline">
+                      {isPausedAudio ? 'جاری' : 'وقفہ'}
+                    </span>
+                  </button>
+                  <button
+                    onClick={handleStopAudio}
+                    className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer animate-pulse"
+                    title="آواز بند کریں"
+                  >
+                    <VolumeX className="w-3.5 h-3.5" />
+                    <span className="font-nastaliq hidden xs:inline">روکیں</span>
+                  </button>
+                </>
+              )}
+
+              {!isPlayingAudio && lastSpokenText && (
                 <button
-                  onClick={handleStopAudio}
-                  className="px-2.5 py-1 bg-red-600 hover:bg-red-500 text-white text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer animate-pulse"
-                  title="آواز بند کریں"
+                  onClick={handleReplayLastAudio}
+                  className="px-2 py-1 bg-white/15 hover:bg-white/25 text-amber-200 text-xs font-bold rounded-xl flex items-center gap-1 cursor-pointer"
+                  title="پچھلا سبق دوبارہ سنیں"
                 >
-                  <VolumeX className="w-3.5 h-3.5" />
-                  <span className="font-nastaliq hidden xs:inline">بند کریں</span>
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span className="font-nastaliq hidden sm:inline">دوبارہ سنیں</span>
                 </button>
               )}
 
@@ -515,22 +738,53 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
             </div>
           </div>
 
-          {/* School Dedicated Operating Hours & Live Status Badge */}
-          <div className="bg-black/35 backdrop-blur-xs px-3 py-1.5 rounded-2xl border border-white/15 flex items-center justify-between text-xs font-nastaliq mt-2.5">
+          {/* Voice Settings & Operating Status Bar */}
+          <div className="bg-black/35 backdrop-blur-xs px-3 py-1.5 rounded-2xl border border-white/15 flex items-center justify-between flex-wrap gap-2 text-xs font-nastaliq mt-2">
             <div className="flex items-center gap-1.5">
               <span className={`w-2.5 h-2.5 rounded-full ${schoolStatus.dotClass}`} />
               <span className="font-bold text-amber-300">{schoolStatus.statusTextUrdu}</span>
-              <span className="text-[10px] text-indigo-200 font-mono">({schoolStatus.statusTextEnglish})</span>
-            </div>
-            <div className="flex items-center gap-2 text-[11px] text-stone-200">
-              <span className="font-mono">⏰ {schoolStatus.openingTime} – {schoolStatus.closingTime}</span>
-              <span className="hidden sm:inline bg-white/10 px-1.5 py-0.5 rounded text-[10px] text-amber-200">
-                وقفہ: {schoolStatus.breakTime}
+              <span className="text-[10px] text-emerald-300 bg-emerald-950/80 border border-emerald-600/40 px-1.5 py-0.5 rounded-md">
+                🎙️ {voiceStatus.statusMessageUrdu}
               </span>
+            </div>
+
+            {/* Voice Gender & Slow Mode Toggles */}
+            <div className="flex items-center gap-1.5 text-[11px]">
+              <button
+                type="button"
+                onClick={() =>
+                  setTeacherVoiceGender((prev) => (prev === 'male' ? 'female' : 'male'))
+                }
+                className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-amber-200 border border-white/15 cursor-pointer"
+                title="استاد کی آواز تبدیل کریں"
+              >
+                {teacherVoiceGender === 'male' ? '👨‍🏫 استاد (مردانہ آواز)' : '👩‍🏫 استانی (زنانہ آواز)'}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleToggleSlowMode}
+                className={`px-2 py-0.5 rounded-lg border cursor-pointer transition ${
+                  slowMode
+                    ? 'bg-amber-400 text-stone-950 font-bold border-amber-300'
+                    : 'bg-white/10 text-stone-200 border-white/15 hover:bg-white/20'
+                }`}
+                title="بچوں کے لیے آہستہ اور واضح آواز"
+              >
+                🐢 آہستہ بولیں {slowMode ? '(آن)' : '(آف)'}
+              </button>
             </div>
           </div>
 
-          {/* Quick Tabs: Classroom, Nursery & Early Fun Learning, Homework, Student ID Card */}
+          {/* Live Spoken Sentence Subtitle Banner */}
+          {isPlayingAudio && activeSpokenSegment && (
+            <div className="mt-2 bg-amber-400/20 border border-amber-300/40 rounded-xl px-3 py-1 text-xs text-amber-100 font-nastaliq flex items-center gap-2">
+              <Volume2 className="w-3.5 h-3.5 text-amber-300 shrink-0 animate-bounce" />
+              <span className="truncate">{activeSpokenSegment}</span>
+            </div>
+          )}
+
+          {/* Quick Tabs */}
           <div className="grid grid-cols-4 gap-1.5 mt-2.5 pt-2 border-t border-white/10 text-xs font-nastaliq">
             <button
               onClick={() => setActiveTab('classroom')}
@@ -553,7 +807,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
               }`}
             >
               <span className="text-sm shrink-0">🧸</span>
-              <span className="truncate">نرسری کھلونے</span>
+              <span className="truncate">نرسری و قاعدہ</span>
             </button>
 
             <button
@@ -583,22 +837,32 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
         </div>
 
         {/* ========================================================================= */}
-        {/* TAB 1: CLASSROOM & SIR ASHRAF INTERACTIVE Q&A */}
+        {/* TAB 1: CLASSROOM & INTERACTIVE ONLINE TEACHER */}
         {/* ========================================================================= */}
         {activeTab === 'classroom' && (
-          <div className="p-3 sm:p-4 flex-1 overflow-y-auto flex flex-col space-y-3">
+          <div className="p-3 sm:p-4 flex-1 overflow-y-auto flex flex-col space-y-2.5">
             {/* Class Selector Row: Nursery to 10th Matric */}
             <div className="bg-stone-50 border border-stone-200 p-2.5 rounded-2xl">
-              <div className="flex items-center justify-between mb-1.5">
+              <div className="flex items-center justify-between mb-1.5 flex-wrap gap-1">
                 <span className="text-xs font-bold text-stone-800 font-nastaliq flex items-center gap-1">
                   <span>🎓 جماعت کا انتخاب کریں (Select Class):</span>
                 </span>
-                <span className="text-[11px] font-bold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded-full font-nastaliq">
-                  منتخب: {currentClassObj.name}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="text-[11px] font-bold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded-full font-nastaliq">
+                    منتخب: {currentClassObj.name}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleClearStudentChat}
+                    className="text-[11px] text-stone-600 hover:text-red-700 bg-stone-200/70 hover:bg-red-100 px-2 py-0.5 rounded-full font-nastaliq flex items-center gap-1 cursor-pointer"
+                    title="اس طالب علم کی گفتگو صاف کریں"
+                  >
+                    <Trash2 className="w-3 h-3" />
+                    <span>نئی گفتگو</span>
+                  </button>
+                </div>
               </div>
 
-              {/* Horizontal Scroll Classes Chips */}
               <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
                 {VILLAGE_SCHOOL_CLASSES.map((cls) => (
                   <button
@@ -623,11 +887,8 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   key={sub.key}
                   onClick={() => {
                     setSelectedSubjectKey(sub.key);
-                    unlockAudioContext();
                     playNotificationChime('teacher');
-                    speakText(`آپ نے ${sub.title} منتخب کیا ہے۔`, lang, undefined, {
-                      isFemaleVillageVoice: false,
-                    });
+                    speakWithTeacherVoice(`آپ نے ${sub.title} منتخب کیا ہے۔ اپنا سوال پوچھیں۔`);
                   }}
                   className={`px-2.5 py-1 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 font-nastaliq ${
                     selectedSubjectKey === sub.key
@@ -641,30 +902,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
               ))}
             </div>
 
-            {/* School Greeting & Voice Help */}
-            <div className="bg-gradient-to-r from-amber-400 via-amber-300 to-yellow-400 border-2 border-amber-500 rounded-2xl p-3 shadow-md flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs text-stone-950">
-              <div className="flex items-center gap-2.5">
-                <span className="text-2xl p-1.5 bg-white/70 rounded-xl shadow-xs shrink-0">🏫</span>
-                <div>
-                  <strong className="text-stone-950 font-nastaliq block text-sm leading-tight">
-                    "السلام علیکم! رتہ کلاں ورچوئل اسکول میں خوش آمدید۔"
-                  </strong>
-                  <span className="text-[11px] text-stone-800 font-nastaliq">
-                    رتہ کلاں ورچوئل اسکول تعلیمی رہنمائی
-                  </span>
-                </div>
-              </div>
-              <button
-                onClick={handleSchoolGreeting}
-                className="px-3 py-1.5 rounded-xl bg-indigo-950 hover:bg-indigo-900 text-amber-300 font-bold font-nastaliq text-xs shadow flex items-center justify-center gap-1.5 cursor-pointer shrink-0 active:scale-95 transition"
-                title="تعلیمی رہنمائی کی آواز سنیں"
-              >
-                <Volume2 className="w-4 h-4 text-amber-300 animate-pulse" />
-                <span>تعلیمی رہنمائی سنیں 🔊</span>
-              </button>
-            </div>
-
-            {/* Quick Nursery / Early Learning Shortcut if Early Class Selected */}
+            {/* Quick Early Learning Banner for Nursery - Class 2 */}
             {['nursery', 'prep', 'class1', 'class2'].includes(selectedClassId) && (
               <div
                 onClick={() => setActiveTab('nursery')}
@@ -673,55 +911,94 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 <div className="flex items-center gap-2">
                   <span className="text-xl">🧸</span>
                   <span className="font-bold">
-                    نرسری تا دوسری جماعت: کھلونے، کارٹون اور تصویری سبق کے لیے یہاں کلک کریں!
+                    نرسری تا دوسری جماعت: مکمل اردو قاعدہ (38 حروف)، A تا Z، گنتی اور کھلونے یہاں سیکھیں!
                   </span>
                 </div>
                 <span className="bg-white text-stone-950 font-bold px-2 py-0.5 rounded-lg text-[10px] shrink-0">
-                  کھلونے والی کلاس ➔
+                  قاعدہ کھولیں ➔
                 </span>
               </div>
             )}
 
             {/* Chat Conversation Box */}
-            <div className="flex-1 bg-stone-50 border border-stone-200 rounded-2xl p-3 space-y-2.5 min-h-[160px] max-h-[260px] overflow-y-auto">
-              {chatHistory.map((item, idx) => (
+            <div className="flex-1 bg-stone-50 border border-stone-200 rounded-2xl p-3 space-y-3 min-h-[190px] max-h-[290px] overflow-y-auto">
+              {chatHistory.map((item) => (
                 <div
-                  key={idx}
+                  key={item.id}
                   className={`flex flex-col ${
                     item.sender === 'student' ? 'items-end' : 'items-start'
                   }`}
                 >
                   <div
-                    className={`max-w-[85%] rounded-2xl p-2.5 text-xs font-nastaliq shadow-sm relative ${
+                    className={`max-w-[90%] rounded-2xl p-3 text-xs font-nastaliq shadow-sm relative ${
                       item.sender === 'student'
                         ? 'bg-indigo-700 text-white rounded-br-none'
                         : 'bg-white text-stone-900 border border-stone-200 rounded-bl-none'
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 mb-1">
-                      <span className="text-[10px] font-bold opacity-80">
-                        {item.sender === 'student' ? 'آپ (طالب علم)' : 'اسکول مددگار'}
+                    <div className="flex items-center justify-between gap-2 mb-1 pb-1 border-b border-black/5">
+                      <span className="text-[10px] font-bold opacity-85">
+                        {item.sender === 'student'
+                          ? `👤 ${currentStudent?.name || 'طالب علم'}`
+                          : '👨‍🏫 آن لائن استاد (Online Teacher)'}
                       </span>
-                      {item.sender === 'teacher' && (
-                        <button
-                          onClick={() => handleSpeakText(item.text)}
-                          className="text-stone-500 hover:text-indigo-700 p-0.5 cursor-pointer"
-                          title="آواز سنیں"
-                        >
-                          <Volume2 className="w-3.5 h-3.5" />
-                        </button>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] opacity-65 font-sans">{item.timestamp}</span>
+                        {item.sender === 'teacher' && (
+                          <button
+                            onClick={() => speakWithTeacherVoice(item.spokenText || item.text)}
+                            className="text-indigo-700 hover:text-indigo-950 bg-indigo-50 hover:bg-indigo-100 px-1.5 py-0.5 rounded-lg flex items-center gap-1 cursor-pointer"
+                            title="جواب آواز میں سنیں"
+                          >
+                            <Volume2 className="w-3.5 h-3.5" />
+                            <span className="text-[10px]">سنیں</span>
+                          </button>
+                        )}
+                      </div>
                     </div>
+
                     <p className="whitespace-pre-line leading-relaxed">{item.text}</p>
+
+                    {/* Follow-up question chip to encourage interactive learning */}
+                    {item.sender === 'teacher' && item.followUpQuestion && (
+                      <div className="mt-2 pt-2 border-t border-stone-200/80 flex items-center justify-between gap-2 text-[11px] text-indigo-900 bg-indigo-50/70 px-2.5 py-1.5 rounded-xl">
+                        <span>🤔 {item.followUpQuestion}</span>
+                      </div>
+                    )}
+
+                    {/* Verified Online Source Citations */}
+                    {item.sender === 'teacher' && item.sources && item.sources.length > 0 && (
+                      <div className="mt-2 pt-2 border-t border-stone-200/80 space-y-1">
+                        <span className="text-[10px] font-bold text-emerald-800 block">
+                          🌐 تصدیق شدہ معلوماتی لنکس (Verified Sources):
+                        </span>
+                        <div className="flex flex-wrap gap-1.5 font-sans">
+                          {item.sources.map((src, sIdx) => (
+                            <a
+                              key={sIdx}
+                              href={src.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="inline-flex items-center gap-1 text-[10px] bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-300 px-2 py-0.5 rounded-lg transition"
+                            >
+                              <ExternalLink className="w-2.5 h-2.5 shrink-0" />
+                              <span className="truncate max-w-[180px]">{src.title}</span>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
+
               {isLoadingAnswer && (
-                <div className="flex items-center gap-2 text-xs text-indigo-700 font-nastaliq">
+                <div className="flex items-center gap-2 text-xs text-indigo-800 font-nastaliq bg-indigo-50 border border-indigo-200 px-3 py-2 rounded-2xl w-fit">
                   <div className="w-3 h-3 rounded-full bg-indigo-600 animate-ping" />
-                  <span>اسکول مددگار جواب تیار کر رہے ہیں...</span>
+                  <span>آن لائن استاد آپ کے سوال کا درست جواب تیار کر رہے ہیں...</span>
                 </div>
               )}
+              <div ref={chatBottomRef} />
             </div>
 
             {/* Question Input Box with Voice Mic & Text */}
@@ -740,8 +1017,8 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   onKeyDown={(e) => e.key === 'Enter' && handleAskQuestion()}
                   placeholder={
                     isListeningVoice
-                      ? 'اسکول مددگار سن رہے ہیں... اپنا سوال بولیں'
-                      : `اسکول مددگار سے ${currentClassObj.name} کا سوال پوچھیں...`
+                      ? '🎙️ استاد سن رہے ہیں... اپنا سوال بولیں'
+                      : `کوئی بھی سوال لکھیں یا مائیک دبائیں (${currentClassObj.name})...`
                   }
                   className="flex-1 text-xs sm:text-sm text-stone-900 px-2 py-1 font-nastaliq focus:outline-none bg-transparent"
                 />
@@ -750,14 +1027,18 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 <button
                   type="button"
                   onClick={handleToggleVoiceQuestion}
-                  className={`p-2 rounded-xl text-xs font-bold transition shadow cursor-pointer active:scale-95 ${
+                  className={`p-2 rounded-xl text-xs font-bold transition shadow cursor-pointer active:scale-95 flex items-center gap-1 ${
                     isListeningVoice
                       ? 'bg-red-600 text-white animate-pulse'
                       : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-900'
                   }`}
                   title="بول کر سوال پوچھیں (Voice Input)"
                 >
-                  {isListeningVoice ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4 text-indigo-800" />}
+                  {isListeningVoice ? (
+                    <MicOff className="w-4 h-4" />
+                  ) : (
+                    <Mic className="w-4 h-4 text-indigo-800" />
+                  )}
                 </button>
 
                 {/* Send Button */}
@@ -772,15 +1053,19 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 </button>
               </div>
 
-              {/* Sample 1-Tap Questions */}
-              <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] text-stone-600 font-nastaliq">
+              {/* Sample 1-Tap Curriculum Questions */}
+              <div className="flex items-center gap-1.5 overflow-x-auto text-[10px] text-stone-600 font-nastaliq pb-0.5">
                 <span className="shrink-0 font-bold text-indigo-900">فوری سوالات:</span>
                 {[
-                  '12 کا پہاڑا سنائیں',
-                  'پانی کا کیمیائی فارمولا کیا ہے؟',
-                  'انگریزی میں سلام کا جواب کیا ہے؟',
-                  'ایک ایکڑ میں کتنے مرلے ہوتے ہیں؟',
-                  'وضو کے فرائض بتائیں',
+                  'What is 2 + 2?',
+                  'What is 15 multiplied by 6?',
+                  'What is the capital of Pakistan?',
+                  'Explain photosynthesis in simple Urdu.',
+                  'What is a noun? Give three English examples.',
+                  'Why should we wash our hands before eating?',
+                  'پاکستان میں بارش کیوں ہوتی ہے؟',
+                  'Explain the water cycle to a class-three student.',
+                  'Who is the current Prime Minister of Pakistan?',
                 ].map((sample) => (
                   <button
                     key={sample}
@@ -799,42 +1084,38 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 2: NURSERY & EARLY CHILDHOOD CARTOON & TOY-BASED LEARNING */}
+        {/* TAB 2: NURSERY & EARLY CHILDHOOD VERIFIED VOICE LEARNING */}
         {/* ========================================================================= */}
         {activeTab === 'nursery' && (
           <div className="p-3 sm:p-4 flex-1 overflow-y-auto space-y-3 font-nastaliq">
-            {/* Child-Friendly Header Banner with Sir Ashraf */}
+            {/* Child-Friendly Header Banner */}
             <div className="bg-gradient-to-r from-pink-600 via-purple-600 to-indigo-600 rounded-3xl p-3 sm:p-4 text-white shadow-lg relative overflow-hidden">
               <div className="flex items-center justify-between gap-2 relative z-10">
                 <div className="flex items-center gap-2.5">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center font-bold text-2xl shadow shrink-0">
+                  <div className="w-11 h-11 rounded-2xl bg-amber-400 text-stone-950 flex items-center justify-center font-bold text-2xl shadow shrink-0">
                     🧸
                   </div>
                   <div>
                     <h3 className="font-bold text-sm sm:text-base text-amber-200 leading-tight">
-                      نرسری تا دوسری جماعت: کھلونے اور کارٹون لرننگ
+                      نرسری تا دوسری جماعت: مکمل صوتی قاعدہ، گنتی اور کھلونے
                     </h3>
                     <p className="text-[11px] text-pink-100">
-                      چھوٹے بچوں کے لیے صوتی تصاویر، کھلونے اور آسان تعلیمی رہنمائی
+                      ہر حرف کا درست نام، فونیٹکس آواز (Phonics) اور مثال الگ الگ سنیں
                     </p>
                   </div>
                 </div>
 
                 <button
                   onClick={() => {
-                    unlockAudioContext();
                     playNotificationChime('teacher');
-                    speakText(
-                      'شاباش! کسی بھی کھلونے یا حرف پر کلک کریں اور مزے سے سنیں اور سیکھیں!',
-                      lang,
-                      undefined,
-                      { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
+                    speakWithTeacherVoice(
+                      'شاباش بچو! کسی بھی حرف، نمبر یا کھلونے پر کلک کریں اور اس کا درست نام، آواز اور لفظ سیکھیں!'
                     );
                   }}
                   className="px-3 py-1.5 bg-amber-400 hover:bg-amber-300 text-stone-950 font-bold rounded-xl text-xs flex items-center gap-1 shadow cursor-pointer shrink-0 active:scale-95 transition"
                 >
                   <Volume2 className="w-3.5 h-3.5" />
-                  <span>سنیں 🔊</span>
+                  <span>ہنمائی سنیں 🔊</span>
                 </button>
               </div>
 
@@ -849,19 +1130,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   }`}
                 >
                   <span>🍎</span>
-                  <span>حروفِ تہجی (18 کارٹون)</span>
-                </button>
-
-                <button
-                  onClick={() => setNurseryCategory('counting')}
-                  className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
-                    nurseryCategory === 'counting'
-                      ? 'bg-amber-400 text-stone-950 shadow'
-                      : 'bg-white/20 text-white hover:bg-white/30'
-                  }`}
-                >
-                  <span>🧸</span>
-                  <span>گنتی و کھلونے (1 تا 10)</span>
+                  <span>اردو حروفِ تہجی ({URDU_ALPHABETS.length} حروف)</span>
                 </button>
 
                 <button
@@ -873,7 +1142,31 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   }`}
                 >
                   <span>🔤</span>
-                  <span>انگلش اے بی سی (ABC)</span>
+                  <span>انگلش اے بی سی (A تا Z - {ENGLISH_ABC.length})</span>
+                </button>
+
+                <button
+                  onClick={() => setNurseryCategory('counting')}
+                  className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
+                    nurseryCategory === 'counting'
+                      ? 'bg-amber-400 text-stone-950 shadow'
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                >
+                  <span>🔢</span>
+                  <span>گنتی و کھلونے (1 تا 100)</span>
+                </button>
+
+                <button
+                  onClick={() => setNurseryCategory('objects')}
+                  className={`px-3 py-1 rounded-xl font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 ${
+                    nurseryCategory === 'objects'
+                      ? 'bg-amber-400 text-stone-950 shadow'
+                      : 'bg-white/20 text-white hover:bg-white/30'
+                  }`}
+                >
+                  <span>🎨</span>
+                  <span>اشیاء، رنگ اور اشکال</span>
                 </button>
 
                 <button
@@ -885,21 +1178,91 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   }`}
                 >
                   <span>⭐</span>
-                  <span>کھلونا کوئز (ستارے جیتیں)</span>
+                  <span>تصویری کوئز</span>
                 </button>
               </div>
             </div>
 
-            {/* Instruction strip for illiterate kids/parents */}
-            <div className="bg-amber-100 border border-amber-300 rounded-2xl p-2 px-3 flex items-center justify-between text-xs text-amber-950">
-              <span className="flex items-center gap-1.5 font-bold">
-                <span>💡</span>
-                <span>کسی بھی کارڈ کو دبائیں، فون خود بول کر نام اور کام سکھائے گا!</span>
-              </span>
-              <span className="text-[10px] bg-amber-200 px-2 py-0.5 rounded font-mono font-bold">1-Tap Voice</span>
-            </div>
+            {/* Voice Pronunciation Mode Selector Bar */}
+            {nurseryCategory !== 'quiz' && (
+              <div className="bg-stone-100 border border-stone-200 rounded-2xl p-2 flex items-center justify-between flex-wrap gap-1.5 text-xs">
+                <span className="font-bold text-indigo-950 px-1">
+                  🔊 بولنے کا انداز (Learning Mode):
+                </span>
+                <div className="flex items-center gap-1 overflow-x-auto scrollbar-none">
+                  {[
+                    { id: 'full' as EarlyLearningMode, label: 'مکمل سبق' },
+                    { id: 'letter_name' as EarlyLearningMode, label: 'حرف / نمبر کا نام' },
+                    { id: 'phonics' as EarlyLearningMode, label: 'آواز (Phonics)' },
+                    { id: 'word_only' as EarlyLearningMode, label: 'صرف لفظ و تصویر' },
+                    { id: 'urdu_only' as EarlyLearningMode, label: 'صرف اردو' },
+                    { id: 'english_only' as EarlyLearningMode, label: 'English Only' },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => setLearningMode(m.id)}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold whitespace-nowrap cursor-pointer transition ${
+                        learningMode === m.id
+                          ? 'bg-indigo-800 text-white shadow'
+                          : 'bg-white text-stone-700 border border-stone-200 hover:bg-indigo-50'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
-            {/* 1. Urdu Haroof-e-Tahajji Grid */}
+            {/* Sequential Counting Bar when inside Counting tab */}
+            {nurseryCategory === 'counting' && (
+              <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-2.5 flex items-center justify-between flex-wrap gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  <span className="text-xl">🔢</span>
+                  <div>
+                    <strong className="text-stone-900 block">
+                      ترتیب وار گنتی پلیئر (Sequential Counting 1 to 10)
+                    </strong>
+                    <span className="text-[11px] text-stone-600">
+                      ہر نمبر ہائی لائٹ ہوگا اور واضح وقفے کے ساتھ بولا جائے گا
+                    </span>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex items-center gap-1 text-[11px] text-stone-800 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={repeatSlowlyCounting}
+                      onChange={(e) => setRepeatSlowlyCounting(e.target.checked)}
+                      className="rounded accent-indigo-700"
+                    />
+                    <span>آہستہ دہرائیں</span>
+                  </label>
+                  <button
+                    onClick={handleStartSequentialCounting}
+                    className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 shadow cursor-pointer ${
+                      isSequentialCounting
+                        ? 'bg-red-600 text-white animate-pulse'
+                        : 'bg-indigo-900 hover:bg-indigo-800 text-amber-300'
+                    }`}
+                  >
+                    {isSequentialCounting ? (
+                      <>
+                        <VolumeX className="w-3.5 h-3.5" />
+                        <span>گنتی روکیں</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-current" />
+                        <span>1 تا 10 ترتیب وار سنیں</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 1. Complete 38-Letter Urdu Haroof-e-Tahajji Grid */}
             {nurseryCategory === 'urdu' && (
               <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 gap-2.5">
                 {URDU_ALPHABETS.map((item) => {
@@ -910,60 +1273,51 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                       onClick={() => handlePlayEarlyItem(item)}
                       className={`p-3 rounded-2xl border-2 transition cursor-pointer flex flex-col items-center text-center gap-1 relative shadow-sm hover:scale-102 active:scale-95 ${
                         item.bgColor
-                      } ${isPlaying ? 'ring-4 ring-amber-400 animate-pulse bg-amber-100' : ''}`}
+                      } ${isPlaying ? 'ring-4 ring-amber-400 bg-amber-100' : ''}`}
                     >
                       <span className="text-3xl sm:text-4xl drop-shadow">{item.icon}</span>
                       <div className="flex items-center gap-1.5 mt-1">
                         <span className="text-2xl font-black text-indigo-950">{item.char}</span>
-                        <span className="text-sm font-bold">{item.word}</span>
+                        <span className="text-sm font-bold">{item.objectLabelUrdu}</span>
                       </div>
-                      <span className="text-[10px] text-stone-500 font-sans">{item.englishWord}</span>
+                      <span className="text-[10px] text-stone-600 font-sans">
+                        {item.letterNameUrdu} • {item.objectLabelEn}
+                      </span>
 
-                      <button
-                        className="mt-1 p-1 bg-white/80 hover:bg-white rounded-full shadow text-indigo-900"
-                        title="آواز سنیں"
+                      {/* Sub-buttons for Letter Name, Phonics, Word */}
+                      <div
+                        className="flex items-center gap-1 mt-1 pt-1 border-t border-black/10 w-full justify-center"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <Volume2 className="w-3.5 h-3.5" />
-                      </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'letter_name')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-indigo-900 shadow-2xs cursor-pointer"
+                          title="صرف حرف کا نام سنیں"
+                        >
+                          حرف
+                        </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'phonics')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-purple-900 shadow-2xs cursor-pointer"
+                          title="حرف کی فونیٹکس آواز سنیں"
+                        >
+                          آواز
+                        </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'word_only')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-emerald-900 shadow-2xs cursor-pointer"
+                          title="مثال کا لفظ سنیں"
+                        >
+                          لفظ
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
 
-            {/* 2. Counting & Toys 1-10 Grid */}
-            {nurseryCategory === 'counting' && (
-              <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 gap-2.5">
-                {COUNTING_TOYS.map((item) => {
-                  const isPlaying = activePlayingId === item.id;
-                  return (
-                    <div
-                      key={item.id}
-                      onClick={() => handlePlayEarlyItem(item)}
-                      className={`p-3 rounded-2xl border-2 transition cursor-pointer flex flex-col items-center text-center gap-1 relative shadow-sm hover:scale-102 active:scale-95 ${
-                        item.bgColor
-                      } ${isPlaying ? 'ring-4 ring-amber-400 animate-pulse bg-amber-100' : ''}`}
-                    >
-                      <span className="text-3xl sm:text-4xl drop-shadow">{item.icon}</span>
-                      <div className="flex items-center gap-1.5 mt-1">
-                        <span className="text-2xl font-mono font-black text-indigo-950">{item.char}</span>
-                        <span className="text-xs font-bold">{item.word}</span>
-                      </div>
-                      <span className="text-[10px] text-stone-500 font-sans">{item.englishWord}</span>
-
-                      <button
-                        className="mt-1 p-1 bg-white/80 hover:bg-white rounded-full shadow text-indigo-900"
-                        title="گنتی سنیں"
-                      >
-                        <Volume2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* 3. English ABC Grid */}
+            {/* 2. Complete 26-Letter English ABC Grid */}
             {nurseryCategory === 'english' && (
               <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 gap-2.5">
                 {ENGLISH_ABC.map((item) => {
@@ -974,96 +1328,206 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                       onClick={() => handlePlayEarlyItem(item)}
                       className={`p-3 rounded-2xl border-2 transition cursor-pointer flex flex-col items-center text-center gap-1 relative shadow-sm hover:scale-102 active:scale-95 ${
                         item.bgColor
-                      } ${isPlaying ? 'ring-4 ring-amber-400 animate-pulse bg-amber-100' : ''}`}
+                      } ${isPlaying ? 'ring-4 ring-amber-400 bg-amber-100' : ''}`}
                     >
                       <span className="text-3xl sm:text-4xl drop-shadow">{item.icon}</span>
                       <div className="flex items-center gap-1.5 mt-1">
-                        <span className="text-2xl font-mono font-black text-indigo-950">{item.char}</span>
-                        <span className="text-xs font-bold font-sans">{item.word}</span>
+                        <span className="text-2xl font-mono font-black text-indigo-950">
+                          {item.char}
+                        </span>
+                        <span className="text-xs font-bold font-sans">{item.objectLabelEn}</span>
                       </div>
-                      <span className="text-[10px] text-stone-600 font-nastaliq">{item.englishWord}</span>
+                      <span className="text-[11px] text-stone-700 font-nastaliq">
+                        {item.objectLabelUrdu} ({item.phonicsSoundEn})
+                      </span>
 
-                      <button
-                        className="mt-1 p-1 bg-white/80 hover:bg-white rounded-full shadow text-indigo-900"
-                        title="Listen ABC"
+                      <div
+                        className="flex items-center gap-1 mt-1 pt-1 border-t border-black/10 w-full justify-center font-sans"
+                        onClick={(e) => e.stopPropagation()}
                       >
-                        <Volume2 className="w-3.5 h-3.5" />
-                      </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'letter_name')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-indigo-900 shadow-2xs cursor-pointer"
+                        >
+                          Letter
+                        </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'phonics')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-purple-900 shadow-2xs cursor-pointer"
+                        >
+                          Phonics
+                        </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'word_only')}
+                          className="px-1.5 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-emerald-900 shadow-2xs cursor-pointer"
+                        >
+                          Word
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
               </div>
             )}
 
-            {/* 4. Toy Quiz for Early Learners */}
+            {/* 3. Counting & Numbers (1-10, 25, 50, 100) Grid */}
+            {nurseryCategory === 'counting' && (
+              <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 gap-2.5">
+                {COUNTING_TOYS.map((item) => {
+                  const isPlaying = activePlayingId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handlePlayEarlyItem(item)}
+                      className={`p-3 rounded-2xl border-2 transition cursor-pointer flex flex-col items-center text-center gap-1 relative shadow-sm hover:scale-102 active:scale-95 ${
+                        item.bgColor
+                      } ${isPlaying ? 'ring-4 ring-amber-400 bg-amber-100 scale-103' : ''}`}
+                    >
+                      <span className="text-3xl sm:text-4xl drop-shadow">{item.icon}</span>
+                      <div className="flex items-center gap-1.5 mt-1">
+                        <span className="text-2xl font-mono font-black text-indigo-950">
+                          {item.char}
+                        </span>
+                        <span className="text-xs font-bold">{item.urduNumberWord}</span>
+                      </div>
+                      <span className="text-[10px] text-stone-700 font-sans font-bold">
+                        {item.englishNumberWord}
+                      </span>
+                      <span className="text-[11px] text-stone-600">{item.objectLabelUrdu}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 4. Verified Colors, Shapes, Toys & Everyday Objects Grid */}
+            {nurseryCategory === 'objects' && (
+              <div className="grid grid-cols-2 xs:grid-cols-3 sm:grid-cols-4 gap-2.5">
+                {OBJECTS_COLORS_SHAPES.map((item) => {
+                  const isPlaying = activePlayingId === item.id;
+                  return (
+                    <div
+                      key={item.id}
+                      onClick={() => handlePlayEarlyItem(item)}
+                      className={`p-3 rounded-2xl border-2 transition cursor-pointer flex flex-col items-center text-center gap-1 relative shadow-sm hover:scale-102 active:scale-95 ${
+                        item.bgColor
+                      } ${isPlaying ? 'ring-4 ring-amber-400 bg-amber-100' : ''}`}
+                    >
+                      <span className="text-3xl sm:text-4xl drop-shadow">{item.icon}</span>
+                      <span className="text-sm font-bold text-stone-900 mt-1">
+                        {item.objectLabelUrdu}
+                      </span>
+                      <span className="text-[11px] text-stone-600 font-sans font-bold">
+                        {item.objectLabelEn}
+                      </span>
+                      <div
+                        className="flex items-center gap-1 mt-1 pt-1 border-t border-black/10 w-full justify-center"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'urdu_only')}
+                          className="px-2 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-indigo-900 cursor-pointer"
+                        >
+                          اردو
+                        </button>
+                        <button
+                          onClick={() => handlePlayEarlyItem(item, 'english_only')}
+                          className="px-2 py-0.5 bg-white/85 hover:bg-white rounded text-[10px] font-bold text-emerald-900 font-sans cursor-pointer"
+                        >
+                          English
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* 5. Multi-Question Interactive Toy & Picture Quiz */}
             {nurseryCategory === 'quiz' && (
               <div className="bg-white border-2 border-purple-300 rounded-3xl p-4 sm:p-5 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
+                <div className="flex items-center justify-between flex-wrap gap-2">
                   <div className="flex items-center gap-2">
                     <span className="text-2xl">🎯</span>
                     <div>
                       <h4 className="font-bold text-sm text-purple-950">
-                        ننھا کھلونا کوئز!
+                        ننھا تصویری کوئز (سوال {activeQuizIdx + 1} از{' '}
+                        {EARLY_LEARNING_QUIZ_QUESTIONS.length})
                       </h4>
                       <p className="text-[11px] text-stone-500">
-                        صحیح کھلونا چنیں اور +2 ستارے انعام پائیں
+                        صحیح تصویر چنیں اور +2 ستارے انعام پائیں
                       </p>
                     </div>
                   </div>
-                  <span className="px-2.5 py-1 bg-amber-400 text-stone-950 font-bold rounded-xl text-xs font-mono">
-                    ⭐ +2 Stars
-                  </span>
+
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => {
+                        speakWithTeacherVoice(currentQuiz.questionUrdu);
+                      }}
+                      className="px-2.5 py-1 bg-purple-100 hover:bg-purple-200 text-purple-900 font-bold rounded-xl text-xs flex items-center gap-1 cursor-pointer"
+                    >
+                      <Volume2 className="w-3.5 h-3.5" />
+                      <span>سوال سنیں</span>
+                    </button>
+                    <button
+                      onClick={() => {
+                        setActiveQuizIdx((prev) => (prev + 1) % EARLY_LEARNING_QUIZ_QUESTIONS.length);
+                        setQuizFeedbackText(null);
+                      }}
+                      className="px-2.5 py-1 bg-indigo-800 hover:bg-indigo-700 text-white font-bold rounded-xl text-xs cursor-pointer"
+                    >
+                      اگلا سوال ➔
+                    </button>
+                  </div>
                 </div>
 
                 <div className="bg-purple-50 p-3 rounded-2xl border border-purple-200 text-center space-y-1">
-                  <span className="text-xs text-purple-900 font-bold block">
-                    سوال: ان میں سے "بلی (Cat 🐱)" کون سی ہے؟
+                  <span className="text-sm text-purple-950 font-bold block">
+                    {currentQuiz.questionUrdu}
                   </span>
-                  <span className="text-[11px] text-stone-600">
-                    نیچے دی گئی تصویروں میں سے بلی کو چھوئیں:
+                  <span className="text-xs text-stone-600 font-sans block">
+                    {currentQuiz.questionEn}
                   </span>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2.5 pt-1">
-                  {[
-                    { icon: '🍎', label: 'سیب', isCorrect: false },
-                    { icon: '🐱', label: 'بلی (Cat)', isCorrect: true },
-                    { icon: '🚗', label: 'گاڑی', isCorrect: false },
-                  ].map((opt, idx) => (
+                  {currentQuiz.options.map((opt, idx) => (
                     <button
                       key={idx}
                       onClick={() => {
                         unlockAudioContext();
                         if (opt.isCorrect) {
                           playNotificationChime('success');
+                          setQuizFeedbackText(opt.hintUrdu);
                           if (currentStudent) {
                             setCurrentStudent((prev) =>
                               prev ? { ...prev, stars: (prev.stars || 0) + 2 } : prev
                             );
                           }
-                          speakText(
-                            'ماشاء اللہ بہت خوب بیٹا! بالکل درست جواب۔ یہ پیاری بلی ہے۔ آپ کو دو ستارے مل گئے!',
-                            lang,
-                            undefined,
-                            { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
-                          );
+                          speakWithTeacherVoice(opt.hintUrdu);
                         } else {
                           playNotificationChime('alert');
-                          speakText(
-                            'دوبارہ کوشش کریں بیٹا! بلی میانو میانو کرتی ہے۔ درمیان والی تصویر دیکھیں۔',
-                            lang,
-                            undefined,
-                            { isFemaleVillageVoice: false, rate: 0.95, pitch: 1.0 }
-                          );
+                          setQuizFeedbackText(opt.hintUrdu);
+                          speakWithTeacherVoice(opt.hintUrdu);
                         }
                       }}
                       className="p-3.5 rounded-2xl bg-stone-50 hover:bg-purple-100 border-2 border-stone-200 hover:border-purple-400 transition cursor-pointer flex flex-col items-center justify-center gap-1 active:scale-95"
                     >
                       <span className="text-4xl">{opt.icon}</span>
-                      <span className="text-xs font-bold text-stone-800 font-nastaliq">{opt.label}</span>
+                      <span className="text-xs font-bold text-stone-800 font-nastaliq">
+                        {opt.labelUrdu}
+                      </span>
+                      <span className="text-[10px] text-stone-500 font-sans">{opt.labelEn}</span>
                     </button>
                   ))}
                 </div>
+
+                {quizFeedbackText && (
+                  <div className="p-3 rounded-2xl bg-amber-50 border border-amber-300 text-xs text-stone-900 font-bold text-center">
+                    {quizFeedbackText}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1074,7 +1538,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
         {/* ========================================================================= */}
         {activeTab === 'homework' && (
           <div className="p-4 flex-1 overflow-y-auto space-y-4">
-            {/* Student Stats Banner */}
             <div className="bg-gradient-to-r from-amber-400 via-yellow-400 to-amber-300 rounded-2xl p-3 shadow text-stone-950 flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-xl bg-stone-950 text-amber-300 flex items-center justify-center font-bold text-lg shadow">
@@ -1097,7 +1560,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
               </div>
             </div>
 
-            {/* Subject Selector */}
             <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
               {SCHOOL_SUBJECTS.map((sub) => (
                 <button
@@ -1107,14 +1569,8 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                     setSelectedAnswerIndex(null);
                     setIsHomeworkSubmitted(false);
                     setHomeworkFeedback(null);
-                    unlockAudioContext();
                     playNotificationChime('teacher');
-                    speakText(
-                      `آپ نے ${sub.title} کا ہوم ورک منتخب کیا ہے۔`,
-                      lang,
-                      undefined,
-                      { isFemaleVillageVoice: false }
-                    );
+                    speakWithTeacherVoice(`آپ نے ${sub.title} کا ہوم ورک منتخب کیا ہے۔`);
                   }}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold whitespace-nowrap transition cursor-pointer flex items-center gap-1 font-nastaliq ${
                     selectedSubjectKey === sub.key
@@ -1128,7 +1584,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
               ))}
             </div>
 
-            {/* Homework Question Card */}
             <div className="bg-white border-2 border-indigo-200 rounded-3xl p-4 sm:p-5 shadow-sm space-y-3">
               <div className="flex items-center justify-between text-xs text-stone-500 font-nastaliq flex-wrap gap-2">
                 <span className="bg-indigo-100 text-indigo-950 px-2.5 py-0.5 rounded-full font-bold">
@@ -1137,34 +1592,23 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 <div className="flex items-center gap-2">
                   <button
                     onClick={() => {
-                      unlockAudioContext();
                       playNotificationChime('teacher');
-                      speakText(`سوال: ${currentHomework.question}`, lang, undefined, {
-                        isFemaleVillageVoice: false,
-                      });
+                      speakWithTeacherVoice(`سوال: ${currentHomework.question}`);
                     }}
                     className="text-indigo-700 hover:underline flex items-center gap-1 font-bold cursor-pointer text-xs"
-                    title="صرف سوال سنیں"
                   >
                     <Volume2 className="w-3.5 h-3.5" />
                     <span>سوال سنیں</span>
                   </button>
                   <button
                     onClick={() => {
-                      unlockAudioContext();
                       playNotificationChime('teacher');
                       const optStr = currentHomework.options
                         .map((o, i) => `آپشن ${i + 1}: ${o}`)
                         .join('۔ ');
-                      speakText(
-                        `سوال: ${currentHomework.question}۔ ${optStr}`,
-                        lang,
-                        undefined,
-                        { isFemaleVillageVoice: false }
-                      );
+                      speakWithTeacherVoice(`سوال: ${currentHomework.question}۔ ${optStr}`);
                     }}
                     className="bg-indigo-50 hover:bg-indigo-100 text-indigo-900 px-2.5 py-1 rounded-lg border border-indigo-200 flex items-center gap-1 font-bold cursor-pointer text-[11px]"
-                    title="سوال اور چاروں آپشنز آواز میں سنیں"
                   >
                     <Volume2 className="w-3.5 h-3.5 text-indigo-700" />
                     <span>سوال مع جوابات سنیں 🔊</span>
@@ -1176,18 +1620,19 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 {currentHomework.question}
               </h3>
 
-              {/* Multiple Choice Options */}
               <div className="space-y-2 pt-1">
                 {currentHomework.options.map((opt, idx) => {
                   const isSelected = selectedAnswerIndex === idx;
                   let optStyle =
                     'border-stone-200 bg-stone-50 hover:bg-indigo-50 text-stone-900';
                   if (isSelected) {
-                    optStyle = 'border-indigo-600 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-400';
+                    optStyle =
+                      'border-indigo-600 bg-indigo-50 text-indigo-950 ring-2 ring-indigo-400';
                   }
                   if (isHomeworkSubmitted) {
                     if (idx === currentHomework.correctIndex) {
-                      optStyle = 'border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-400';
+                      optStyle =
+                        'border-emerald-600 bg-emerald-50 text-emerald-950 ring-2 ring-emerald-400';
                     } else if (isSelected) {
                       optStyle = 'border-red-600 bg-red-50 text-red-950 ring-2 ring-red-400';
                     }
@@ -1199,10 +1644,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                       onClick={() => {
                         if (!isHomeworkSubmitted) {
                           setSelectedAnswerIndex(idx);
-                          unlockAudioContext();
-                          speakText(`آپشن ${idx + 1}: ${opt}`, lang, undefined, {
-                            isFemaleVillageVoice: false,
-                          });
+                          speakWithTeacherVoice(`آپشن ${idx + 1}: ${opt}`);
                         }
                       }}
                       disabled={isHomeworkSubmitted}
@@ -1225,7 +1667,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 })}
               </div>
 
-              {/* Feedback Alert */}
               {homeworkFeedback && (
                 <div
                   className={`p-3 rounded-2xl text-xs font-nastaliq leading-relaxed border ${
@@ -1238,7 +1679,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                 </div>
               )}
 
-              {/* Submit / Reset Actions */}
               <div className="flex items-center gap-2 pt-2">
                 {!isHomeworkSubmitted ? (
                   <button
@@ -1265,7 +1705,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
         )}
 
         {/* ========================================================================= */}
-        {/* TAB 3: ADMISSION & STUDENT ID CARD */}
+        {/* TAB 4: ADMISSION & STUDENT ID CARD (WITH SESSION ISOLATION) */}
         {/* ========================================================================= */}
         {activeTab === 'idcard' && (
           <div className="p-4 flex-1 overflow-y-auto space-y-4">
@@ -1281,7 +1721,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   </h4>
                 </div>
                 <p className="text-xs text-stone-500 font-nastaliq">
-                  رتہ کلاں کے تمام بچوں اور بیٹیوں کے لیے آن لائن اسکول کارڈ اور رول نمبر مفت جاری کیا جاتا ہے۔
+                  رتہ کلاں کے تمام بچوں اور بیٹیوں کے لیے الگ تعلیمی سیشن، اسکول کارڈ اور رول نمبر مفت جاری کیا جاتا ہے۔
                 </p>
 
                 <div className="space-y-2">
@@ -1329,7 +1769,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                     </select>
                   </div>
 
-                  {/* Photo / Selfie Upload Option */}
                   <div>
                     <label className="text-xs font-bold text-stone-700 font-nastaliq block mb-1">
                       طالب علم کی تصویر یا سیلفی (Photo / Selfie)
@@ -1345,12 +1784,15 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                     <div className="flex items-center gap-2.5">
                       {regPhoto ? (
                         <div className="relative w-14 h-14 rounded-2xl overflow-hidden border-2 border-indigo-500 shadow shrink-0">
-                          <img src={regPhoto} alt="Student preview" className="w-full h-full object-cover" />
+                          <img
+                            src={regPhoto}
+                            alt="Student preview"
+                            className="w-full h-full object-cover"
+                          />
                           <button
                             type="button"
                             onClick={() => setRegPhoto('')}
                             className="absolute top-0.5 right-0.5 bg-red-600 text-white rounded-full p-0.5 text-[10px]"
-                            title="تصویر ہٹائیں"
                           >
                             ✕
                           </button>
@@ -1365,7 +1807,11 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                         onClick={() => photoInputRef.current?.click()}
                         className="flex-1 py-2 px-3 bg-indigo-50 hover:bg-indigo-100 text-indigo-900 border border-indigo-200 rounded-xl text-xs font-bold font-nastaliq flex items-center justify-center gap-1.5 transition active:scale-95 cursor-pointer"
                       >
-                        <span>{regPhoto ? 'تصویر تبدیل کریں 📷' : 'کیمرہ سے سیلفی لیں یا گیلری سے منتخب کریں 📷'}</span>
+                        <span>
+                          {regPhoto
+                            ? 'تصویر تبدیل کریں 📷'
+                            : 'کیمرہ سے سیلفی لیں یا گیلری سے منتخب کریں 📷'}
+                        </span>
                       </button>
                     </div>
                   </div>
@@ -1391,11 +1837,7 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
               </form>
             ) : (
               <div className="space-y-4">
-                {/* Official Student Card */}
                 <div className="bg-gradient-to-br from-indigo-950 via-purple-950 to-stone-900 border-2 border-amber-400 rounded-3xl p-5 text-white shadow-xl relative overflow-hidden">
-                  <div className="absolute top-0 right-0 w-36 h-36 bg-amber-400/10 rounded-full blur-2xl pointer-events-none" />
-
-                  {/* Card Header */}
                   <div className="flex items-center justify-between border-b border-white/20 pb-3 mb-3">
                     <div className="flex items-center gap-2">
                       <GraduationCap className="w-5 h-5 text-amber-300" />
@@ -1413,7 +1855,6 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                     </span>
                   </div>
 
-                  {/* Student Details with live Photo / Avatar */}
                   <div className="flex items-center gap-4">
                     <div className="w-16 h-16 rounded-2xl overflow-hidden bg-amber-400 text-stone-950 flex items-center justify-center font-bold text-2xl shadow shrink-0 border-2 border-amber-300">
                       {currentStudent.photo ? (
@@ -1427,13 +1868,9 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                       )}
                     </div>
                     <div className="space-y-1 font-nastaliq">
-                      <h3 className="font-bold text-lg text-white">
-                        {currentStudent.name}
-                      </h3>
+                      <h3 className="font-bold text-lg text-white">{currentStudent.name}</h3>
                       {currentStudent.fatherName && (
-                        <p className="text-xs text-stone-300">
-                          ولد: {currentStudent.fatherName}
-                        </p>
+                        <p className="text-xs text-stone-300">ولد: {currentStudent.fatherName}</p>
                       )}
                       <div className="flex items-center gap-2 text-xs text-amber-300">
                         <span>جماعت: {currentStudent.classGrade}</span>
@@ -1449,12 +1886,19 @@ export const AiSchoolModal: React.FC<AiSchoolModalProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <button
                     onClick={() => setIsRegistering(true)}
                     className="flex-1 py-2.5 bg-stone-200 hover:bg-stone-300 text-stone-900 font-bold rounded-2xl text-xs font-nastaliq transition cursor-pointer"
                   >
-                    کارڈ تبدیل / نیا داخلہ
+                    نیا طالب علم / کارڈ تبدیل کریں
+                  </button>
+                  <button
+                    onClick={handleLogoutStudent}
+                    className="px-4 py-2.5 bg-red-100 hover:bg-red-200 text-red-900 font-bold rounded-2xl text-xs font-nastaliq transition cursor-pointer flex items-center gap-1"
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                    <span>لاگ آؤٹ</span>
                   </button>
                   <button
                     onClick={() => window.print()}
