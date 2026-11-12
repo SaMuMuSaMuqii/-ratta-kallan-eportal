@@ -108,7 +108,7 @@ import { TimetableEditModal } from './components/TimetableEditModal';
 import { HospitalsModal } from './components/HospitalsModal';
 import { TermsModal } from './components/TermsModal';
 import { EmergencyQuickCallBox } from './components/EmergencyQuickCallBox';
-import { PwaInstallPrompt } from './components/PwaInstallPrompt';
+import { PwaInstallPrompt, PwaFloatingInstallButton } from './components/PwaInstallPrompt';
 import { CommunityHelpNoticeboardModal } from './components/CommunityHelpNoticeboardModal';
 import { VoiceAskModal, VoiceAskPanel } from './components/VoiceAskModal';
 import { FooterPageView, FooterPageType } from './components/FooterPages';
@@ -4745,34 +4745,46 @@ export default function App() {
         </footer>
       </div>
 
-      {/* Floating "بول کر پوچھیں" Microphone Button on Every Main Screen */}
-      <button
-        type="button"
-        onClick={() => {
-          unlockAudioContext();
-          setVoiceAskInitialQuestion('');
-          setIsVoiceAskModalOpen(true);
-        }}
-        className="fixed bottom-[76px] md:bottom-6 left-2.5 sm:left-6 z-40 min-h-[46px] sm:min-h-[52px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-3.5 sm:px-4 py-2 rounded-full shadow-2xl border-2 border-amber-300 flex items-center gap-1.5 sm:gap-2 font-nastaliq font-extrabold text-xs sm:text-sm hover:scale-105 active:scale-95 transition cursor-pointer"
-        title="بول کر پوچھیں (صوتی مددگار)"
-        aria-label="بول کر پوچھیں"
+      {/* Unified Fixed Bottom Floating Action Row (Emergency | Install App | Voice Ask) */}
+      <div
+        dir="rtl"
+        className="fixed bottom-[84px] md:bottom-5 inset-x-2 sm:inset-x-6 z-40 pointer-events-none"
       >
-        <Mic className="w-4 h-4 sm:w-5 sm:h-5 text-amber-300 shrink-0" />
-        <span>بول کر پوچھیں</span>
-      </button>
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-1.5 sm:gap-3">
+          {/* Right (in RTL): Emergency Button */}
+          <button
+            type="button"
+            onClick={() => navigateToFooterPage('emergency')}
+            className="pointer-events-auto h-[38px] sm:h-[46px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-2.5 sm:px-4 rounded-full shadow-xl border-2 border-white flex items-center justify-center gap-1 sm:gap-1.5 font-nastaliq font-bold text-[11px] sm:text-xs hover:scale-105 active:scale-95 transition cursor-pointer shrink-0 whitespace-nowrap"
+            title="ایمرجنسی صفحہ کھولیں"
+            aria-label="Emergency Page"
+          >
+            <span className="text-xs sm:text-sm leading-none">🚨</span>
+            <span className="leading-none">ایمرجنسی</span>
+          </button>
 
-      {/* Small, Non-Obstructive Clickable Floating Emergency Button (🚨 ایمرجنسی) */}
-      <button
-        onClick={() => navigateToFooterPage('emergency')}
-        className="fixed bottom-[76px] md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[46px] md:min-h-[52px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
-        title="ایمرجنسی صفحہ کھولیں"
-        aria-label="Emergency Page"
-      >
-        <span className="text-sm">🚨</span>
-        <span className="text-[11px] font-bold text-white tracking-wide">ایمرجنسی</span>
-      </button>
+          {/* Center: Fixed Floating App Install Button */}
+          <PwaFloatingInstallButton lang={lang} />
 
-      {/* Automatic PWA Install Popup Banner & Fixed Floating Download Button */}
+          {/* Left (in RTL): Voice Ask Button */}
+          <button
+            type="button"
+            onClick={() => {
+              unlockAudioContext();
+              setVoiceAskInitialQuestion('');
+              setIsVoiceAskModalOpen(true);
+            }}
+            className="pointer-events-auto h-[38px] sm:h-[46px] bg-gradient-to-r from-emerald-700 to-teal-800 hover:from-emerald-800 hover:to-teal-900 text-white px-2.5 sm:px-4 rounded-full shadow-xl border-2 border-amber-300 flex items-center justify-center gap-1 sm:gap-1.5 font-nastaliq font-extrabold text-[11px] sm:text-xs md:text-sm hover:scale-105 active:scale-95 transition cursor-pointer shrink-0 whitespace-nowrap"
+            title="بول کر پوچھیں (صوتی مددگار)"
+            aria-label="بول کر پوچھیں"
+          >
+            <Mic className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-amber-300 shrink-0" />
+            <span className="leading-none">بول کر پوچھیں</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Automatic PWA Install Popup Banner & Guided Modal */}
       <PwaInstallPrompt lang={lang} />
 
       {/* Mobile Fixed Bottom Navigation Bar */}
