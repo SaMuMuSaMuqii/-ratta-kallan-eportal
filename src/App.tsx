@@ -108,6 +108,7 @@ import { TimetableEditModal } from './components/TimetableEditModal';
 import { HospitalsModal } from './components/HospitalsModal';
 import { TermsModal } from './components/TermsModal';
 import { EmergencyQuickCallBox } from './components/EmergencyQuickCallBox';
+import { PwaInstallPrompt } from './components/PwaInstallPrompt';
 import { CommunityHelpNoticeboardModal } from './components/CommunityHelpNoticeboardModal';
 import { VoiceAskModal, VoiceAskPanel } from './components/VoiceAskModal';
 import { FooterPageView, FooterPageType } from './components/FooterPages';
@@ -4763,13 +4764,16 @@ export default function App() {
       {/* Small, Non-Obstructive Clickable Floating Emergency Button (🚨 ایمرجنسی) */}
       <button
         onClick={() => navigateToFooterPage('emergency')}
-        className="fixed bottom-[76px] md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[46px] sm:min-h-[52px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
+        className="fixed bottom-[76px] md:bottom-6 right-2.5 sm:right-6 z-40 min-h-[46px] md:min-h-[52px] bg-gradient-to-r from-red-600 to-rose-700 hover:from-red-700 hover:to-rose-800 text-white px-3 sm:px-3.5 py-2 rounded-full shadow-2xl border-2 border-white flex items-center gap-1.5 font-nastaliq font-bold text-xs hover:scale-105 active:scale-95 transition cursor-pointer"
         title="ایمرجنسی صفحہ کھولیں"
         aria-label="Emergency Page"
       >
         <span className="text-sm">🚨</span>
         <span className="text-[11px] font-bold text-white tracking-wide">ایمرجنسی</span>
       </button>
+
+      {/* Automatic PWA Install Popup Banner & Fixed Floating Download Button */}
+      <PwaInstallPrompt lang={lang} />
 
       {/* Mobile Fixed Bottom Navigation Bar */}
       <MobileBottomNav
