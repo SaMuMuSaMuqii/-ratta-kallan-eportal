@@ -22,7 +22,7 @@ export const PUSH_SUBSCRIPTION_ID_KEY = 'rk_push_subscription_id_v1';
 export const DEFAULT_NOTIFICATION_SETTINGS: UserNotificationSettings = {
   inAppEnabled: true,
   soundEnabled: true,
-  pushEnabled: false,
+  pushEnabled: true,
   messageAlerts: true,
   announcementAlerts: true,
   updatedAt: new Date().toISOString(),
@@ -93,7 +93,7 @@ export const loadNotificationSettings = (userKey?: string): UserNotificationSett
     return {
       inAppEnabled: parsed.inAppEnabled !== false,
       soundEnabled: parsed.soundEnabled !== false,
-      pushEnabled: Boolean(parsed.pushEnabled),
+      pushEnabled: parsed.pushEnabled !== false,
       messageAlerts: parsed.messageAlerts !== false,
       announcementAlerts: parsed.announcementAlerts !== false,
       updatedAt: parsed.updatedAt || new Date().toISOString(),
@@ -353,6 +353,16 @@ export const isNotificationForCurrentUser = (
     return true;
   }
 
+  // If the user has not logged in or entered a phone number yet (guest mode on device),
+  // or is testing sending a message from the same phone, allow the notification to appear in the Bell center
+  if (!session && !activeProfileId && !activePhone) {
+    return true;
+  }
+
+  if (activePhone && notif.senderMobile && phonesMatch(activePhone, notif.senderMobile)) {
+    return true;
+  }
+
   return false;
 };
 
@@ -528,9 +538,18 @@ export const dispatchSystemPushNotification = async (
   notif: PortalNotificationItem,
   settings: UserNotificationSettings
 ): Promise<boolean> => {
-  if (!settings.pushEnabled) return false;
+  if (settings.pushEnabled === false) return false;
   if (typeof window === 'undefined' || !('Notification' in window)) return false;
-  if (Notification.permission !== 'granted') return false;
+
+  let permission = Notification.permission;
+  if (permission === 'default') {
+    try {
+      permission = await Notification.requestPermission();
+    } catch {
+      // ignore if browser blocks non-gesture request
+    }
+  }
+  if (permission !== 'granted') return false;
 
   if (notif.type === 'new_message' || notif.type === 'message_reply') {
     if (!settings.messageAlerts) return false;
@@ -567,8 +586,8 @@ export const dispatchSystemPushNotification = async (
         }
         await reg.showNotification(payload.title, {
           body: payload.body,
-          icon: '/icons/icon-192x192.svg',
-          badge: '/icons/icon-192x192.svg',
+          icon: '/logo.png',
+          badge: '/logo.png',
           tag: payload.tag,
           data: payload,
         });
@@ -578,7 +597,7 @@ export const dispatchSystemPushNotification = async (
 
     const browserNotif = new Notification(payload.title, {
       body: payload.body,
-      icon: '/icons/icon-192x192.svg',
+      icon: '/logo.png',
       tag: payload.tag,
       data: payload,
     });

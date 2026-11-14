@@ -797,15 +797,23 @@ export default function App() {
     return counts;
   }, [messages]);
 
-  // Recipient-scoped unread messages count for the current user (never leaks other villagers' unread counts)
+  // Recipient-scoped unread messages count for the current user (with fallback for guest device)
   const totalUnreadCount = useMemo(() => {
-    return messages.filter((m) =>
+    const userScopedCount = messages.filter((m) =>
       isMessageUnreadForCurrentUser(
         m,
         activeUserSession,
         currentUserPhone,
         matchedUserProfile?.id || null
       )
+    ).length;
+    if (userScopedCount > 0 || activeUserSession || currentUserPhone) {
+      return userScopedCount;
+    }
+    return messages.filter(
+      (m) =>
+        !m.deletedByRecipient &&
+        (typeof m.unreadByRecipient === 'boolean' ? m.unreadByRecipient : !m.isRead)
     ).length;
   }, [messages, activeUserSession, currentUserPhone, matchedUserProfile?.id]);
 
@@ -861,7 +869,12 @@ export default function App() {
     localStorage.setItem(STORAGE_CURRENT_USER_PHONE_KEY, clean);
     localStorage.setItem(STORAGE_CURRENT_USER_NAME_KEY, userNameInput.trim());
     setIsEditingUserPhone(false);
-    showToastNotification(`آپ کا موبائل نمبر (${clean}) کامیابی سے محفوظ ہو گیا!`);
+    void requestAndRegisterPushNotifications({
+      session: activeUserSession,
+      currentUserPhone: clean,
+      matchedProfileId: matchedUserProfile?.id || null,
+    });
+    showToastNotification(`آپ کا موبائل نمبر (${clean}) محفوظ ہو گیا اور نوٹیفکیشنز فعال کر دی گئیں!`);
   };
 
   // Search normalization helper
@@ -1741,10 +1754,12 @@ export default function App() {
   // Real-time detector for newly arrived incoming messages & replies for the current user
   const prevMessageSignaturesRef = useRef<Map<string, string>>(new Map());
   const isInitialMessagesSnapshotRef = useRef<boolean>(true);
+  const alertedEventSigsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const prevMap = prevMessageSignaturesRef.current;
     const nextMap = new Map<string, string>();
+    const isGuestDevice = !activeUserSession && !currentUserPhone && !matchedUserProfile?.id;
 
     messages.forEach((m) => {
       const threadLen = m.discussionThread?.length || 0;
@@ -1753,17 +1768,27 @@ export default function App() {
       const sig = `${m.id}_${threadLen}_${lastReplyId}`;
       nextMap.set(m.id, sig);
 
-      if (isInitialMessagesSnapshotRef.current) return;
-
       const prevSig = prevMap.get(m.id);
       if (prevSig === sig) return; // No new message or reply on this thread
 
-      const isRecipient = isCurrentUserRecipientOfMessage(
-        m,
-        activeUserSession,
-        currentUserPhone,
-        matchedUserProfile?.id || null
-      );
+      const msgTimestamp = new Date(m.updatedAt || m.replyCreatedAt || m.createdAt || 0).getTime();
+      const isFreshMessage = Date.now() - msgTimestamp < 25000;
+
+      // Skip historical messages on initial mount unless the message just arrived in the last 25 seconds
+      if (isInitialMessagesSnapshotRef.current && !isFreshMessage) {
+        alertedEventSigsRef.current.add(sig);
+        return;
+      }
+
+      if (alertedEventSigsRef.current.has(sig)) return;
+
+      const isRecipient =
+        isCurrentUserRecipientOfMessage(
+          m,
+          activeUserSession,
+          currentUserPhone,
+          matchedUserProfile?.id || null
+        ) || isGuestDevice;
       const isSender = isCurrentUserSenderOfMessage(
         m,
         activeUserSession,
@@ -1771,8 +1796,9 @@ export default function App() {
         matchedUserProfile?.id || null
       );
 
-      // Case 1: Brand new message arrived for current user (and wasn't sent by current user)
+      // Case 1: Brand new message arrived for current user (or guest device)
       if (!prevSig && isRecipient && !isSender) {
+        alertedEventSigsRef.current.add(sig);
         const eventId = `incoming_msg_${m.id}`;
         if (notificationSettings.messageAlerts) {
           if (notificationSettings.soundEnabled) {
@@ -1780,7 +1806,7 @@ export default function App() {
           }
           if (notificationSettings.inAppEnabled) {
             showToastNotification(
-              `📩 نیا پیغام موصول ہوا: ${m.senderName} کی طرف سے "${(
+              `📩 نیا پیغام برائے ${m.targetProfileName || 'پروفائل'}: ${m.senderName} کی طرف سے "${(
                 m.messageText || ''
               ).slice(0, 55)}" — دیکھنے کے لیے کلک کریں`,
               {
@@ -1799,7 +1825,7 @@ export default function App() {
             recipientMobile: m.targetMobile,
             recipientUid: m.recipientUid,
             type: 'new_message',
-            title: `${m.senderName} کی طرف سے نیا پیغام`,
+            title: `${m.targetProfileName ? `${m.targetProfileName} کے لیے ` : ''}${m.senderName} کا نیا پیغام`,
             body: m.messageText || 'وائس میسج موصول ہوا ہے',
             senderName: m.senderName,
             senderMobile: m.senderMobile,
@@ -1822,9 +1848,11 @@ export default function App() {
         const replyForCurrentUser =
           (replyRole === 'receiver' && isSender) ||
           (replyRole === 'sender' && isRecipient) ||
-          (replyRole === 'admin' && (isSender || isRecipient));
+          (replyRole === 'admin' && (isSender || isRecipient)) ||
+          isGuestDevice;
 
         if (replyForCurrentUser && notificationSettings.messageAlerts) {
+          alertedEventSigsRef.current.add(sig);
           const eventId = `incoming_reply_${m.id}_${latestItem?.id || Date.now()}`;
           const replySenderName =
             latestItem?.senderName ||
@@ -1869,9 +1897,7 @@ export default function App() {
     });
 
     prevMessageSignaturesRef.current = nextMap;
-    if (messages.length > 0) {
-      isInitialMessagesSnapshotRef.current = false;
-    }
+    isInitialMessagesSnapshotRef.current = false;
   }, [
     messages,
     activeUserSession,
@@ -2136,7 +2162,7 @@ export default function App() {
       recipientMobile: newMsg.targetMobile,
       recipientUid: newMsg.recipientUid,
       type: 'new_message',
-      title: `${newMsg.senderName} کی طرف سے نیا پیغام`,
+      title: `${messageData.targetProfileName} کے لیے ${newMsg.senderName} کا نیا پیغام`,
       body: newMsg.messageText || 'وائس میسج موصول ہوا ہے',
       senderName: newMsg.senderName,
       senderMobile: newMsg.senderMobile,
@@ -2148,6 +2174,9 @@ export default function App() {
     setPortalNotifications((prev) => [newNotif, ...prev]);
     saveNotificationToFirestore(newNotif).catch(() => {});
 
+    // Also dispatch system/browser notification if permission is granted (or request it on send)
+    void dispatchSystemPushNotification(newNotif, notificationSettings);
+
     // Trigger email notification hook if recipient has email
     const targetProf = profiles.find((p) => p.id === newMsg.targetProfileId);
     if (targetProf) {
@@ -2158,12 +2187,12 @@ export default function App() {
     }
 
     showToastNotification(
-      `پیغام براہ راست ${messageData.targetProfileName} کے ان باکس میں پہنچ چکا ہے!`,
+      `🔔 پیغام براہِ راست ${messageData.targetProfileName} کے ان باکس میں پہنچ گیا اور نوٹیفکیشن جاری کر دی گئی! (کھولنے کے لیے کلک کریں)`,
       {
         eventId: `sent_${msgId}`,
         actionTarget: {
           messageId: msgId,
-          recipientPhone: newMsg.senderMobile,
+          recipientPhone: newMsg.targetMobile || newMsg.senderMobile,
         },
       }
     );
@@ -2725,7 +2754,7 @@ export default function App() {
 
 
   // Card render helpers for universal search isolation and regular list
-  const renderProfileCard = (profile: VillageProfile) => {
+  const renderProfileCard = (profile: VillageProfile, isSearchCard: boolean = false) => {
     const whatsappClean = profile.whatsapp
       ? profile.whatsapp.replace(/\D/g, '').replace(/^0/, '92')
       : profile.mobile.replace(/\D/g, '').replace(/^0/, '92');
@@ -2737,13 +2766,19 @@ export default function App() {
         key={profile.id}
         className="bg-white rounded-xl sm:rounded-2xl lg:rounded-3xl border border-stone-200/90 shadow-xs sm:shadow-sm hover:shadow-md transition-shadow overflow-hidden flex flex-col justify-between h-full relative min-w-0"
       >
-        {/* Card Media Header */}
-        <div className="relative h-20 sm:h-32 lg:h-36 bg-stone-900 overflow-hidden shrink-0">
+        {/* Card Media Header (Clickable to open full profile) */}
+        <div
+          onClick={() => setSelectedProfile(profile)}
+          className={`relative ${
+            isSearchCard ? 'h-32 sm:h-36' : 'h-20 sm:h-32 lg:h-36'
+          } bg-stone-900 overflow-hidden shrink-0 cursor-pointer group`}
+          title={`${profile.name} کی مکمل پروفائل کھولیں`}
+        >
           {profile.businessImage ? (
             <img
               src={profile.businessImage}
               alt={profile.businessName}
-              className="w-full h-full object-cover opacity-90"
+              className="w-full h-full object-cover opacity-90 group-hover:scale-105 transition-transform duration-300"
             />
           ) : (
             <div className="w-full h-full bg-gradient-to-r from-emerald-950 via-teal-950 to-stone-900 flex items-center justify-center text-white/25">
@@ -2762,26 +2797,56 @@ export default function App() {
             </div>
           )}
 
-          {/* Person Avatar & Name overlay with responsive sizing for 4-col mobile & desktop */}
-          <div className="absolute bottom-1 sm:bottom-2.5 right-1 sm:right-3 left-1 sm:left-3 flex flex-col sm:flex-row sm:items-end gap-0.5 sm:gap-2.5 z-10 min-w-0">
+          {/* Person Avatar & Name overlay */}
+          <div
+            className={`absolute ${
+              isSearchCard
+                ? 'bottom-2.5 right-3 left-3 flex-row items-end gap-2.5'
+                : 'bottom-1 sm:bottom-2.5 right-1 sm:right-3 left-1 sm:left-3 flex-col sm:flex-row sm:items-end gap-0.5 sm:gap-2.5'
+            } flex z-10 min-w-0`}
+          >
             <div className="relative shrink-0 self-center sm:self-auto">
               <img
                 src={profile.personImage}
                 alt={profile.name}
-                className="w-7 h-7 sm:w-11 sm:h-11 lg:w-14 lg:h-14 rounded-full object-cover border sm:border-2 border-amber-400 shadow bg-stone-800"
+                className={`${
+                  isSearchCard
+                    ? 'w-12 h-12 sm:w-14 sm:h-14 border-2'
+                    : 'w-7 h-7 sm:w-11 sm:h-11 lg:w-14 lg:h-14 border sm:border-2'
+                } rounded-full object-cover border-amber-400 shadow bg-stone-800`}
               />
               {profile.isVerified && (
-                <div className="absolute -bottom-0.5 -right-0.5 bg-amber-400 rounded-full p-0.5 shadow hidden sm:block">
+                <div
+                  className={`absolute -bottom-0.5 -right-0.5 bg-amber-400 rounded-full p-0.5 shadow ${
+                    isSearchCard ? 'block' : 'hidden sm:block'
+                  }`}
+                >
                   <ShieldCheck className="w-3 h-3 lg:w-3.5 lg:h-3.5 text-stone-950 fill-amber-400" />
                 </div>
               )}
             </div>
 
-            <div className="text-white drop-shadow min-w-0 flex-1 text-center sm:text-right w-full">
-              <h4 className="font-bold text-[9px] sm:text-xs lg:text-base font-nastaliq leading-tight sm:leading-relaxed text-amber-200 truncate">
+            <div
+              className={`text-white drop-shadow min-w-0 flex-1 ${
+                isSearchCard ? 'text-right' : 'text-center sm:text-right'
+              } w-full`}
+            >
+              <h4
+                className={`font-bold ${
+                  isSearchCard
+                    ? 'text-sm sm:text-base leading-relaxed'
+                    : 'text-[9px] sm:text-xs lg:text-base leading-tight sm:leading-relaxed'
+                } font-nastaliq text-amber-200 truncate`}
+              >
                 {profile.name}
               </h4>
-              <span className="text-[7.5px] sm:text-[10px] lg:text-xs text-stone-200 font-semibold block leading-tight sm:leading-relaxed truncate">
+              <span
+                className={`${
+                  isSearchCard
+                    ? 'text-xs leading-relaxed'
+                    : 'text-[7.5px] sm:text-[10px] lg:text-xs leading-tight sm:leading-relaxed'
+                } text-stone-200 font-semibold block truncate`}
+              >
                 {profile.businessName}
               </span>
             </div>
@@ -2789,7 +2854,11 @@ export default function App() {
 
           {/* Audio button on card */}
           <button
-            onClick={() => handleSpeakCard(profile)}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleSpeakCard(profile);
+            }}
             className={`absolute top-1 sm:top-2.5 right-1 sm:right-2.5 p-1 sm:p-2 rounded-full text-white backdrop-blur shadow z-10 cursor-pointer transition ${
               activeCardAudioId === profile.id
                 ? 'bg-red-600 animate-voice-pulse'
@@ -2806,29 +2875,45 @@ export default function App() {
 
           {/* Category pill */}
           <div className="absolute top-1 sm:top-2.5 left-1 sm:left-2.5 z-10 max-w-[68%]">
-            <span className="px-1 sm:px-2.5 py-0.5 rounded-full text-[7px] sm:text-[10px] font-bold bg-emerald-800/90 text-white backdrop-blur shadow block truncate">
+            <span
+              className={`px-1 sm:px-2.5 py-0.5 rounded-full ${
+                isSearchCard ? 'text-[10px] px-2.5' : 'text-[7px] sm:text-[10px]'
+              } font-bold bg-emerald-800/90 text-white backdrop-blur shadow block truncate`}
+            >
               {cats[profile.category] || profile.category}
             </span>
           </div>
         </div>
 
         {/* Content */}
-        <div className="p-1.5 sm:p-3 lg:p-3.5 space-y-1 sm:space-y-2.5 flex-1 flex flex-col justify-between min-w-0">
-          {/* Compact Mobile Info (<640px) for 4-Column Mobile Grid */}
-          <div className="flex sm:hidden flex-col gap-0.5 min-w-0 font-nastaliq">
-            <div className="flex items-center justify-center gap-1 min-w-0">
-              <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${opStatus.dotClass}`} />
-              <span className="text-[7.5px] font-bold text-stone-700 truncate">
-                {opStatus.statusTextUrdu}
-              </span>
+        <div
+          className={`${
+            isSearchCard ? 'p-3.5 space-y-2.5' : 'p-1.5 sm:p-3 lg:p-3.5 space-y-1 sm:space-y-2.5'
+          } flex-1 flex flex-col justify-between min-w-0`}
+        >
+          {/* Compact Mobile Info (<640px) ONLY for the 4-Column Mobile Grid */}
+          {!isSearchCard && (
+            <div
+              onClick={() => setSelectedProfile(profile)}
+              className="flex sm:hidden flex-col gap-0.5 min-w-0 font-nastaliq cursor-pointer"
+            >
+              <div className="flex items-center justify-center gap-1 min-w-0">
+                <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${opStatus.dotClass}`} />
+                <span className="text-[7.5px] font-bold text-stone-700 truncate">
+                  {opStatus.statusTextUrdu}
+                </span>
+              </div>
+              <div className="text-[7.5px] text-stone-500 text-center truncate">
+                {profile.address}
+              </div>
             </div>
-            <div className="text-[7.5px] text-stone-500 text-center truncate">
-              {profile.address}
-            </div>
-          </div>
+          )}
 
-          {/* Full Tablet & Desktop Details (>=640px) */}
-          <div className="hidden sm:block space-y-2.5 min-w-0">
+          {/* Full Details (Always visible on Search Cards, and on >=640px for 4x4 Grid) */}
+          <div
+            onClick={() => setSelectedProfile(profile)}
+            className={`${isSearchCard ? 'block' : 'hidden sm:block'} space-y-2.5 min-w-0 cursor-pointer`}
+          >
             {/* Business Dedicated Operating Hours, Break & Live Status Badge */}
             <div className="bg-gradient-to-r from-stone-50 via-amber-50/20 to-stone-50 border border-stone-200/90 rounded-2xl p-2 lg:p-2.5 space-y-1.5 font-nastaliq shadow-2xs">
               <div className="flex items-center justify-between gap-1.5 flex-wrap">
@@ -2881,45 +2966,59 @@ export default function App() {
             </div>
           </div>
 
-          {/* Compact Action buttons on Mobile (<640px) so 4 columns fit without overflow */}
-          <div className="grid grid-cols-2 gap-1 pt-0.5 sm:hidden font-nastaliq">
-            {profile.mobile ? (
-              <a
-                href={`tel:${profile.mobile}`}
-                className="min-h-[26px] py-1 px-1 rounded-lg bg-emerald-700 text-white font-bold text-[8px] flex items-center justify-center gap-0.5 shadow-2xs transition active:scale-95 truncate"
-              >
-                <Phone className="w-2.5 h-2.5 shrink-0" />
-                <span className="truncate">کال</span>
-              </a>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setSelectedProfile(profile)}
-                className="min-h-[26px] py-1 px-1 rounded-lg bg-stone-200 text-stone-700 font-bold text-[8px] flex items-center justify-center truncate"
-              >
-                <span>پروفائل</span>
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => setSelectedProfile(profile)}
-              className="min-h-[26px] py-1 px-1 rounded-lg bg-stone-100 text-stone-800 font-bold text-[8px] border border-stone-200 flex items-center justify-center gap-0.5 transition cursor-pointer truncate"
-            >
-              <Eye className="w-2.5 h-2.5 text-stone-600 shrink-0" />
-              <span className="truncate">تفصیل</span>
-            </button>
-          </div>
+          {/* Compact Action buttons on Mobile (<640px) ONLY for 4x4 Grid — includes Open Profile, Message & Call */}
+          {!isSearchCard && (
+            <div className="space-y-1 pt-0.5 sm:hidden font-nastaliq">
+              <div className="grid grid-cols-2 gap-1">
+                <button
+                  type="button"
+                  onClick={() => setSelectedProfile(profile)}
+                  className="min-h-[26px] py-1 px-1 rounded-lg bg-stone-900 text-amber-300 font-bold text-[8px] border border-amber-400/50 flex items-center justify-center gap-0.5 transition cursor-pointer truncate"
+                >
+                  <Eye className="w-2.5 h-2.5 text-amber-300 shrink-0" />
+                  <span className="truncate">پروفائل</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMessageTargetProfile(profile)}
+                  className="min-h-[26px] py-1 px-1 rounded-lg bg-amber-400 text-stone-950 font-bold text-[8px] flex items-center justify-center gap-0.5 shadow-2xs transition active:scale-95 cursor-pointer truncate"
+                >
+                  <Send className="w-2.5 h-2.5 shrink-0" />
+                  <span className="truncate">میسج</span>
+                </button>
+              </div>
+              {profile.mobile && (
+                <a
+                  href={`tel:${profile.mobile}`}
+                  className="w-full min-h-[24px] py-0.5 px-1 rounded-lg bg-emerald-700 text-white font-bold text-[8px] flex items-center justify-center gap-0.5 shadow-2xs transition active:scale-95 truncate"
+                >
+                  <Phone className="w-2.5 h-2.5 shrink-0" />
+                  <span className="truncate">کال کریں</span>
+                </a>
+              )}
+            </div>
+          )}
 
-          {/* Full Action buttons on Tablet & Desktop (>=640px) */}
-          <div className="hidden sm:block space-y-1.5 pt-1 font-nastaliq">
+          {/* Full Action buttons (Always visible on Search Cards, and on >=640px for 4x4 Grid) */}
+          <div className={`${isSearchCard ? 'block' : 'hidden sm:block'} space-y-1.5 pt-1 font-nastaliq`}>
             <div className="grid grid-cols-3 gap-1.5">
-              <a
-                href={`tel:${profile.mobile}`}
-                className="min-h-[40px] py-2 px-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
-              >
-                <Phone className="w-3.5 h-3.5 shrink-0" />
-                <span>کال</span>
-              </a>
+              {profile.mobile ? (
+                <a
+                  href={`tel:${profile.mobile}`}
+                  className="min-h-[40px] py-2 px-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95"
+                >
+                  <Phone className="w-3.5 h-3.5 shrink-0" />
+                  <span>کال</span>
+                </a>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setSelectedProfile(profile)}
+                  className="min-h-[40px] py-2 px-2 rounded-xl bg-stone-200 text-stone-700 font-bold text-xs flex items-center justify-center gap-1"
+                >
+                  <span>فون درج نہیں</span>
+                </button>
+              )}
 
               <a
                 href={`https://wa.me/${whatsappClean}`}
@@ -2932,23 +3031,26 @@ export default function App() {
               </a>
 
               <button
+                type="button"
                 onClick={() => setMessageTargetProfile(profile)}
                 className="min-h-[40px] py-2 px-2 rounded-xl bg-amber-400 hover:bg-amber-500 text-stone-950 font-bold text-xs flex items-center justify-center gap-1 shadow-sm transition active:scale-95 cursor-pointer"
               >
                 <Send className="w-3.5 h-3.5 shrink-0" />
-                <span>میسج</span>
+                <span>میسج کریں</span>
               </button>
             </div>
 
             <div className="flex items-center gap-1.5">
               <button
+                type="button"
                 onClick={() => setSelectedProfile(profile)}
-                className="min-h-[40px] flex-1 py-2 px-2.5 rounded-xl bg-stone-100 hover:bg-stone-200 text-stone-800 font-bold text-xs border border-stone-200 flex items-center justify-center gap-1 transition cursor-pointer font-nastaliq"
+                className="min-h-[40px] flex-1 py-2 px-2.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-amber-300 font-bold text-xs border border-amber-400/60 flex items-center justify-center gap-1.5 transition cursor-pointer font-nastaliq shadow-xs"
               >
-                <Eye className="w-3.5 h-3.5 text-stone-600 shrink-0" />
-                <span>مکمل تفصیل</span>
+                <Eye className="w-3.5 h-3.5 text-amber-300 shrink-0" />
+                <span>پروفائل کھولیں (مکمل تفصیل و میسج)</span>
               </button>
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleRequestEditProfile(profile);
@@ -3766,62 +3868,105 @@ export default function App() {
                   {searchAssistantAnswer.displayText}
                 </div>
 
-                {/* Short List of Best Matches with Big Call Button or Portal Action Button */}
+                {/* Short List of Best Matches with Open Profile, Message, Call or Portal Action Button */}
                 {searchAssistantAnswer.matchedItems && searchAssistantAnswer.matchedItems.length > 0 && (
                   <div className="space-y-2 pt-1">
                     <span className="text-xs font-bold text-emerald-950 block">
-                      بہترین نتائج (فوری ایکشن / فون کال):
+                      بہترین نتائج (پروفائل کھولیں، میسج کریں یا فون کال ملائیں):
                     </span>
-                    {searchAssistantAnswer.matchedItems.map((mItem) => (
-                      <div
-                        key={mItem.id}
-                        className="bg-white border-2 border-emerald-500 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs"
-                      >
-                        <div className="text-right space-y-0.5">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="font-extrabold text-sm sm:text-base text-stone-900">
-                              {mItem.title}
-                            </span>
-                            {mItem.badgeText && (
-                              <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
-                                {mItem.badgeText}
-                              </span>
+                    {searchAssistantAnswer.matchedItems.map((mItem) => {
+                      const matchedProfile = profiles.find((p) => p.id === mItem.id);
+                      return (
+                        <div
+                          key={mItem.id}
+                          className="bg-white border-2 border-emerald-500 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-2xs"
+                        >
+                          <div
+                            onClick={() => {
+                              if (matchedProfile) {
+                                setSelectedProfile(matchedProfile);
+                              }
+                            }}
+                            className={`text-right space-y-0.5 flex items-center gap-2.5 min-w-0 ${
+                              matchedProfile ? 'cursor-pointer group' : ''
+                            }`}
+                          >
+                            {matchedProfile?.personImage && (
+                              <img
+                                src={matchedProfile.personImage}
+                                alt={matchedProfile.name}
+                                className="w-12 h-12 rounded-full object-cover border-2 border-amber-400 shadow shrink-0 bg-stone-800"
+                              />
+                            )}
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-extrabold text-sm sm:text-base text-stone-900 group-hover:text-emerald-700 transition">
+                                  {mItem.title}
+                                </span>
+                                {mItem.badgeText && (
+                                  <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
+                                    {mItem.badgeText}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-stone-600 font-bold">
+                                {mItem.categoryLabel} — 📍 {mItem.area}
+                              </div>
+                              {mItem.phone && (
+                                <div className="font-mono font-bold text-sm text-emerald-800" dir="ltr">
+                                  {mItem.phone}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
+                            {mItem.portalActionType && (
+                              <button
+                                type="button"
+                                onClick={() => handleTriggerPortalAction(mItem.portalActionType!)}
+                                className="min-h-[46px] px-4 py-2 bg-amber-400 hover:bg-amber-500 text-stone-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                              >
+                                <ArrowRight className="w-4 h-4" />
+                                <span>{mItem.portalActionButtonLabel || 'کھولیں'}</span>
+                              </button>
+                            )}
+
+                            {matchedProfile && (
+                              <button
+                                type="button"
+                                onClick={() => setSelectedProfile(matchedProfile)}
+                                className="min-h-[46px] flex-1 sm:flex-initial px-4 py-2 bg-stone-900 hover:bg-stone-800 text-amber-300 font-extrabold text-xs sm:text-sm rounded-2xl shadow border border-amber-400/60 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                              >
+                                <Eye className="w-4 h-4 text-amber-300 shrink-0" />
+                                <span>پروفائل کھولیں</span>
+                              </button>
+                            )}
+
+                            {matchedProfile && (
+                              <button
+                                type="button"
+                                onClick={() => setMessageTargetProfile(matchedProfile)}
+                                className="min-h-[46px] flex-1 sm:flex-initial px-4 py-2 bg-amber-400 hover:bg-amber-500 text-stone-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow border border-amber-500 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                              >
+                                <Send className="w-4 h-4 text-stone-950 shrink-0" />
+                                <span>میسج کریں</span>
+                              </button>
+                            )}
+
+                            {mItem.phone && (
+                              <a
+                                href={`tel:${mItem.phone.replace(/[^0-9+]/g, '')}`}
+                                className="min-h-[46px] flex-1 sm:flex-initial px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition active:scale-95"
+                              >
+                                <PhoneCall className="w-4 h-4 shrink-0" />
+                                <span>فون کریں</span>
+                              </a>
                             )}
                           </div>
-                          <div className="text-xs text-stone-600 font-bold">
-                            {mItem.categoryLabel} — 📍 {mItem.area}
-                          </div>
-                          {mItem.phone && (
-                            <div className="font-mono font-bold text-sm text-emerald-800" dir="ltr">
-                              {mItem.phone}
-                            </div>
-                          )}
                         </div>
-
-                        <div className="flex items-center gap-2 shrink-0">
-                          {mItem.portalActionType && (
-                            <button
-                              type="button"
-                              onClick={() => handleTriggerPortalAction(mItem.portalActionType!)}
-                              className="min-h-[52px] px-5 py-2.5 bg-amber-400 hover:bg-amber-500 text-stone-950 font-extrabold text-sm sm:text-base rounded-2xl shadow flex items-center justify-center gap-2 cursor-pointer transition active:scale-95"
-                            >
-                              <ArrowRight className="w-5 h-5" />
-                              <span>{mItem.portalActionButtonLabel || 'کھولیں'}</span>
-                            </button>
-                          )}
-
-                          {mItem.phone && (
-                            <a
-                              href={`tel:${mItem.phone.replace(/[^0-9+]/g, '')}`}
-                              className="min-h-[52px] px-5 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-sm sm:text-base rounded-2xl shadow flex items-center justify-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
-                            >
-                              <PhoneCall className="w-5 h-5" />
-                              <span>فون کریں</span>
-                            </a>
-                          )}
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
 
@@ -3914,7 +4059,7 @@ export default function App() {
                   <span className="text-stone-500">رتہ کلاں</span>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
-                  {filteredProfiles.map((p) => renderProfileCard(p))}
+                  {filteredProfiles.map((p) => renderProfileCard(p, true))}
                 </div>
               </div>
             )}
@@ -4242,6 +4387,8 @@ export default function App() {
               userMessages={activeUserSession ? messages : []}
               initialLang={lang}
               onApplyToSearchBar={(q) => setSearchQuery(q)}
+              onOpenProfile={(p) => setSelectedProfile(p)}
+              onMessageProfile={(p) => setMessageTargetProfile(p)}
             />
 
             {/* User Personal Mobile Number Setup & Messages Widget */}
@@ -5232,6 +5379,14 @@ export default function App() {
         initialQuestion={voiceAskInitialQuestion}
         onApplyToSearchBar={(q) => {
           setSearchQuery(q);
+          setIsVoiceAskModalOpen(false);
+        }}
+        onOpenProfile={(p) => {
+          setSelectedProfile(p);
+          setIsVoiceAskModalOpen(false);
+        }}
+        onMessageProfile={(p) => {
+          setMessageTargetProfile(p);
           setIsVoiceAskModalOpen(false);
         }}
       />

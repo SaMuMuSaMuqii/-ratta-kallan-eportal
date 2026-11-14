@@ -17,6 +17,8 @@ import {
   Send,
   Sparkles,
   Clock,
+  Eye,
+  MessageCircle,
 } from 'lucide-react';
 import {
   VillageProfile,
@@ -86,6 +88,8 @@ export interface VoiceAskSharedProps {
   onClose?: () => void;
   isInlineHomeScreen?: boolean;
   onApplyToSearchBar?: (query: string) => void;
+  onOpenProfile?: (profile: VillageProfile) => void;
+  onMessageProfile?: (profile: VillageProfile) => void;
 }
 
 interface VoiceAskModalProps extends VoiceAskSharedProps {
@@ -117,6 +121,8 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
   onClose,
   isInlineHomeScreen = false,
   onApplyToSearchBar,
+  onOpenProfile,
+  onMessageProfile,
 }) => {
   // Always start with Urdu by default
   const [selectedLang, setSelectedLang] = useState<Language>(initialLang || 'ur');
@@ -717,49 +723,101 @@ export const VoiceAskPanel: React.FC<VoiceAskSharedProps> = ({
               </div>
             )}
 
-            {/* Short List of Best Matches with Big Call Button */}
+            {/* Short List of Best Matches with Open Profile, Message & Call Buttons */}
             {currentAnswer.matchedItems && currentAnswer.matchedItems.length > 0 && (
               <div className="space-y-2 pt-1">
                 <span className="text-xs font-bold text-emerald-950 block">
-                  بہترین نتائج (فوری رابطہ اور تفصیل):
+                  بہترین نتائج (پروفائل کھولیں، میسج یا فون کال کریں):
                 </span>
-                {currentAnswer.matchedItems.map((mItem) => (
-                  <div
-                    key={mItem.id}
-                    className="bg-white border-2 border-emerald-500 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs"
-                  >
-                    <div className="text-right space-y-0.5 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="font-extrabold text-sm sm:text-base text-stone-900">
-                          {mItem.title}
-                        </span>
-                        {mItem.badgeText && (
-                          <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
-                            {mItem.badgeText}
-                          </span>
+                {currentAnswer.matchedItems.map((mItem) => {
+                  const matchedProfile = profiles.find((p) => p.id === mItem.id);
+                  return (
+                    <div
+                      key={mItem.id}
+                      className="bg-white border-2 border-emerald-500 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 shadow-xs"
+                    >
+                      <div
+                        onClick={() => {
+                          if (matchedProfile && onOpenProfile) {
+                            stopSpeaking();
+                            onOpenProfile(matchedProfile);
+                          }
+                        }}
+                        className={`text-right space-y-0.5 min-w-0 flex items-center gap-2.5 ${
+                          matchedProfile && onOpenProfile ? 'cursor-pointer group' : ''
+                        }`}
+                      >
+                        {matchedProfile?.personImage && (
+                          <img
+                            src={matchedProfile.personImage}
+                            alt={matchedProfile.name}
+                            className="w-11 h-11 rounded-full object-cover border-2 border-amber-400 shadow shrink-0 bg-stone-800"
+                          />
+                        )}
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-extrabold text-sm sm:text-base text-stone-900 group-hover:text-emerald-700 transition">
+                              {mItem.title}
+                            </span>
+                            {mItem.badgeText && (
+                              <span className="text-[10px] bg-emerald-100 text-emerald-900 px-2 py-0.5 rounded-full font-bold border border-emerald-300">
+                                {mItem.badgeText}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-stone-600 font-bold">
+                            {mItem.categoryLabel} — 📍 {mItem.area}
+                          </div>
+                          {mItem.phone && (
+                            <div className="font-mono font-bold text-sm text-emerald-800" dir="ltr">
+                              {mItem.phone}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 shrink-0">
+                        {matchedProfile && onOpenProfile && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              stopSpeaking();
+                              onOpenProfile(matchedProfile);
+                            }}
+                            className="min-h-[44px] flex-1 sm:flex-initial px-3.5 py-2 bg-stone-900 hover:bg-stone-800 text-amber-300 font-extrabold text-xs sm:text-sm rounded-2xl shadow-md border border-amber-400/60 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                          >
+                            <Eye className="w-4 h-4 text-amber-300 shrink-0" />
+                            <span>پروفائل کھولیں</span>
+                          </button>
+                        )}
+
+                        {matchedProfile && onMessageProfile && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              stopSpeaking();
+                              onMessageProfile(matchedProfile);
+                            }}
+                            className="min-h-[44px] flex-1 sm:flex-initial px-3.5 py-2 bg-amber-400 hover:bg-amber-500 text-stone-950 font-extrabold text-xs sm:text-sm rounded-2xl shadow-md border border-amber-500 flex items-center justify-center gap-1.5 cursor-pointer transition active:scale-95"
+                          >
+                            <MessageCircle className="w-4 h-4 text-stone-950 shrink-0" />
+                            <span>میسج کریں</span>
+                          </button>
+                        )}
+
+                        {mItem.phone && (
+                          <a
+                            href={`tel:${mItem.phone.replace(/[^0-9+]/g, '')}`}
+                            className="min-h-[44px] flex-1 sm:flex-initial px-3.5 py-2 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-xs sm:text-sm rounded-2xl shadow-md flex items-center justify-center gap-1.5 shrink-0 cursor-pointer transition active:scale-95"
+                          >
+                            <PhoneCall className="w-4 h-4 shrink-0" />
+                            <span>فون کریں</span>
+                          </a>
                         )}
                       </div>
-                      <div className="text-xs text-stone-600 font-bold">
-                        {mItem.categoryLabel} — 📍 {mItem.area}
-                      </div>
-                      {mItem.phone && (
-                        <div className="font-mono font-bold text-sm text-emerald-800" dir="ltr">
-                          {mItem.phone}
-                        </div>
-                      )}
                     </div>
-
-                    {mItem.phone && (
-                      <a
-                        href={`tel:${mItem.phone.replace(/[^0-9+]/g, '')}`}
-                        className="min-h-[48px] px-4 py-2.5 bg-emerald-700 hover:bg-emerald-800 text-white font-extrabold text-sm rounded-2xl shadow-md flex items-center justify-center gap-2 shrink-0 cursor-pointer transition active:scale-95"
-                      >
-                        <PhoneCall className="w-4 h-4" />
-                        <span>فون کریں</span>
-                      </a>
-                    )}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
 
